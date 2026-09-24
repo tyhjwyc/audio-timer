@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0b">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>定时循环音频播放器</title>
+<style>
+  :root {
+    --bg: #0a0a0b;
+    --panel: #16161a;
+    --panel2: #1e1e24;
+    --line: #2a2a32;
+    --text: #e8e8ea;
+    --dim: #8b8b96;
+    --accent: #34c759;
+    --accent-dim: #1e6b33;
+    --danger: #ff453a;
+    --warn: #ffd60a;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 16px; line-height: 1.5;
+    overscroll-behavior: none;
+  }
+  body {
+    min-height: 100vh;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .wrap { width: 100%; max-width: 520px; }
+
+  h1 { font-size: 20px; font-weight: 600; margin: 8px 0 20px; text-align: center; letter-spacing: 0.02em; }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px; margin-bottom: 14px;
+  }
+  .card-label { font-size: 13px; color: var(--dim); margin-bottom: 10px; letter-spacing: 0.04em; }
+
+  /* 文件选择 */
+  .file-btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; min-height: 52px;
+    background: var(--panel2); border: 1px dashed var(--line);
+    border-radius: 10px; color: var(--text);
+    font-size: 15px; cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .file-btn:active { background: #26262e; }
+  .file-btn.has-file { border-style: solid; border-color: var(--accent-dim); }
+  input[type=file] { display: none; }
+  .file-info { margin-top: 10px; font-size: 13px; color: var(--dim); word-break: break-all; }
+  .file-info b { color: var(--text); font-weight: 500; }
+
+  /* 参数 */
+  .params { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 13px; color: var(--dim); }
+  .field .unit { font-size: 12px; color: #5c5c66; }
+  input[type=number] {
+    width: 100%; min-height: 50px;
+    background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 10px; color: var(--text);
+    font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums;
+    text-align: center; padding: 0 8px;
+    -moz-appearance: textfield;
+  }
+  input[type=number]:focus { outline: none; border-color: var(--accent); }
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+  .switch-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line);
+  }
+  .switch-row .sw-label { font-size: 14px; }
+  .switch-row .sw-desc { font-size: 12px; color: var(--dim); margin-top: 2px; }
+  .switch { position: relative; width: 50px; height: 30px; flex: 0 0 auto; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0; background: #33333d;
+    border-radius: 15px; transition: background .2s; cursor: pointer;
+  }
+  .slider::before {
+    content: ""; position: absolute; width: 24px; height: 24px;
+    left: 3px; top: 3px; background: #fff; border-radius: 50%;
+    transition: transform .2s;
+  }
+  .switch input:checked + .slider { background: var(--accent); }
+  .switch input:checked + .slider::before { transform: translateX(20px); }
+
+  /* 控制按钮 */
+  .controls { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .btn {
+    min-height: 60px; border: none; border-radius: 12px;
+    font-size: 18px; font-weight: 600; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    transition: opacity .15s, transform .1s;
+    font-family: inherit;
+  }
+  .btn:active { transform: scale(0.985); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn-start { background: var(--accent); color: #04140a; }
+  .btn-stop { background: var(--danger); color: #fff; }
+  .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  /* 状态 */
+  .status-card { text-align: center; }
+  .big-timer {
+    font-size: 52px; font-weight: 700; font-variant-numeric: tabular-nums;
+    line-height: 1.1; letter-spacing: -0.02em;
+    margin: 4px 0 2px;
+  }
+  .big-timer.playing { color: var(--accent); }
+  .big-timer.waiting { color: var(--warn); }
+  .big-label { font-size: 13px; color: var(--dim); letter-spacing: 0.06em; }
+  .meta { display: flex; justify-content: space-around; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .meta div { font-size: 13px; color: var(--dim); }
+  .meta b { display: block; font-size: 17px; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+
+  /* 提示条 */
+  .notice {
+    font-size: 13px; line-height: 1.65; color: var(--dim);
+    background: var(--panel); border: 1px solid var(--line);
+    border-left: 3px solid var(--warn);
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 14px;
+  }
+  .notice b { color: var(--text); font-weight: 600; }
+  .notice.err { border-left-color: var(--danger); }
+  .notice.ok { border-left-color: var(--accent); }
+  .notice:empty { display: none; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>定时循环音频播放器</h1>
+
+  <div id="notice" class="notice hidden"></div>
+
+  <div class="card">
+    <div class="card-label">音频素材</div>
+    <label class="file-btn" id="fileBtn" for="fileInput">
+      <span id="fileBtnText">选择手机里的音频文件</span>
+    </label>
+    <input type="file" id="fileInput" accept="audio/*">
+    <div class="file-info hidden" id="fileInfo"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">播放参数</div>
+    <div class="params">
+      <div class="field">
+        <label for="playSec">播放时长</label>
+        <input type="number" id="playSec" value="3" min="0.5" step="0.5" inputmode="decimal">
+        <span class="unit">秒（每轮响这么久）</span>
+      </div>
+      <div class="field">
+        <label for="gapSec">间隔时长</label>
+        <input type="number" id="gapSec" value="30" min="0" step="0.5" inputmode="decimal">
+        <span class="unit">秒（从上次结束算起）</span>
+      </div>
+    </div>
+    <div class="switch-row">
+      <div>
+        <div class="sw-label">音频循环补齐</div>
+        <div class="sw-desc" id="loopDesc">素材不足播放时长时自动循环</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="loopMode" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+  </div>
+
+  <div class="card status-card">
+    <div class="big-label" id="stateLabel">未开始</div>
+    <div class="big-timer" id="bigTimer">--</div>
+    <div class="big-label" id="timerHint">等待开始</div>
+    <div class="meta">
+      <div>已运行<b id="elapsed">0:00</b></div>
+      <div>已完成<b id="rounds">0</b></div>
+      <div>唤醒锁<b id="wakeState">未启用</b></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn btn-start" id="startBtn" disabled>开始播放</button>
+    <div class="btn-row">
+      <button class="btn btn-stop" id="stopBtn" disabled>停止</button>
+      <button class="btn" id="testBtn" disabled style="background:var(--panel2);color:var(--text);border:1px solid var(--line)">试听一次</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+
+// ---------- 状态 ----------
+let ctx = null;                 // AudioContext
+let buffer = null;              // 解码后的音频
+let fileName = "";
+let running = false;
+let events = [];                // {start, end, src} 已调度的事件（音频时钟）
+let scheduleCursor = 0;         // 下一个事件的起始时间（音频时钟）
+let runStartAudio = 0;          // 本轮开始的音频时钟
+let roundsDone = 0;
+let wakeLock = null;
+let pumpTimer = null;           // 补充调度器（不负责触发，只负责补排）
+let uiTimer = null;
+
+const LOOKAHEAD = 30;           // 预调度未来 30 秒的事件
+const PUMP_MS = 5000;           // 每 5 秒补充一次调度
+const FADE = 0.008;             // 8ms 淡入淡出，防爆音
+
+// ---------- 元素 ----------
+const $ = id => document.getElementById(id);
+const fileInput = $("fileInput"), fileBtn = $("fileBtn"), fileBtnText = $("fileBtnText");
+const fileInfo = $("fileInfo"), noticeEl = $("notice");
+const playSecEl = $("playSec"), gapSecEl = $("gapSec"), loopModeEl = $("loopMode");
+const startBtn = $("startBtn"), stopBtn = $("stopBtn"), testBtn = $("testBtn");
+const stateLabel = $("stateLabel"), bigTimer = $("bigTimer"), timerHint = $("timerHint");
+const elapsedEl = $("elapsed"), roundsEl = $("rounds"), wakeStateEl = $("wakeState");
+
+// ---------- 工具 ----------
+function showNotice(html, kind) {
+  noticeEl.className = "notice" + (kind ? " " + kind : "");
+  noticeEl.innerHTML = html;
+  noticeEl.classList.remove("hidden");
+}
+
+function fmtClock(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const mm = String(m).padStart(h ? 2 : 1, "0");
+  const ss = String(s).padStart(2, "0");
+  return h ? h + ":" + mm + ":" + ss : mm + ":" + ss;
+}
+
+function fmtDur(sec) {
+  if (!isFinite(sec)) return "--";
+  if (sec < 60) return sec.toFixed(1).replace(/\.0$/, "") + " 秒";
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return m + " 分 " + s + " 秒";
+}
+
+function getParams() {
+  const m = parseFloat(playSecEl.value);
+  const n = parseFloat(gapSecEl.value);
+  return {
+    m: (isFinite(m) && m > 0) ? m : 3,
+    n: (isFinite(n) && n >= 0) ? n : 0
+  };
+}
+
+// ---------- 音频上下文 ----------
+function ensureCtx() {
+  if (!ctx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) throw new Error("这个浏览器不支持 Web Audio");
+    ctx = new AC();
+  }
+  return ctx;
+}
+
+// ---------- 文件导入与解码 ----------
+fileInput.addEventListener("change", async () => {
+  const f = fileInput.files && fileInput.files[0];
+  if (!f) return;
+  fileName = f.name;
+  fileBtnText.textContent = "已选择，点击可更换";
+  fileBtn.classList.add("has-file");
+  fileInfo.classList.remove("hidden");
+  fileInfo.innerHTML = "<b>" + escapeHtml(f.name) + "</b><br>正在解码…";
+
+  try {
+    ensureCtx();
+    const ab = await f.arrayBuffer();
+    const decoded = await new Promise((res, rej) => {
+      const p = ctx.decodeAudioData(ab, res, rej);
+      if (p && p.then) p.then(res, rej);
+    });
+    buffer = decoded;
+    fileInfo.innerHTML = "<b>" + escapeHtml(f.name) + "</b><br>时长 " +
+      fmtDur(buffer.duration) + " · " + buffer.numberOfChannels + " 声道 · " +
+      buffer.sampleRate + " Hz";
+    startBtn.disabled = false;
+    testBtn.disabled = false;
+    updateLoopDesc();
+    showNotice("素材已就绪。点<b>开始播放</b>后，请让这个页面保持在前台、屏幕不要手动锁掉。", "ok");
+  } catch (err) {
+    buffer = null;
+    startBtn.disabled = true;
+    testBtn.disabled = true;
+    fileInfo.innerHTML = "<b>" + escapeHtml(f.name) + "</b><br>解码失败";
+    showNotice("解码失败：" + escapeHtml(String(err && err.message || err)) +
+      "<br>请换一个常见的音频格式，比如 mp3 或 m4a。", "err");
+  }
+});
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+// ---------- 唤醒锁 ----------
+async function acquireWakeLock() {
+  if (!("wakeLock" in navigator)) {
+    wakeStateEl.textContent = "不支持";
+    return false;
+  }
+  if (!window.isSecureContext) {
+    wakeStateEl.textContent = "需 HTTPS";
+    return false;
+  }
+  try {
+    wakeLock = await navigator.wakeLock.request("screen");
+    wakeStateEl.textContent = "已启用";
+    wakeLock.addEventListener("release", () => {
+      wakeStateEl.textContent = running ? "已释放" : "未启用";
+    });
+    return true;
+  } catch (err) {
+    wakeStateEl.textContent = "申请失败";
+    return false;
+  }
+}
+
+async function releaseWakeLock() {
+  if (wakeLock) {
+    try { await wakeLock.release(); } catch (e) {}
+    wakeLock = null;
+  }
+  wakeStateEl.textContent = "未启用";
+}
+
+// 页面重新可见时，唤醒锁会被系统释放，需要重新申请
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState === "visible" && running) {
+    await acquireWakeLock();
+  }
+});
+
+// ---------- 调度核心 ----------
+// 用音频硬件时钟预调度，不用任何定时器触发播放，因此不存在漂移累积
+function scheduleOne(t) {
+  const { m } = getParams();
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+
+  const gain = ctx.createGain();
+  src.connect(gain);
+  gain.connect(ctx.destination);
+
+  // 淡入淡出，避免切在波形中间产生爆音
+  const f = Math.min(FADE, m / 4);
+  gain.gain.setValueAtTime(0, t);
+  gain.gain.linearRampToValueAtTime(1, t + f);
+  gain.gain.setValueAtTime(1, t + m - f);
+  gain.gain.linearRampToValueAtTime(0, t + m);
+
+  if (loopModeEl.checked) {
+    // 素材不足 M 秒时循环补齐
+    src.loop = true;
+    src.start(t, 0);
+    src.stop(t + m);
+  } else {
+    // 素材播完就静音，直到下一轮
+    src.start(t, 0, m);
+  }
+
+  const ev = { start: t, end: t + m, src: src };
+  events.push(ev);
+  src.onended = () => {
+    const i = events.indexOf(ev);
+    if (i >= 0) events.splice(i, 1);
+  };
+}
+
+function scheduleAhead() {
+  if (!running || !buffer) return;
+  const { m, n } = getParams();
+  const horizon = ctx.currentTime + LOOKAHEAD;
+  let guard = 0;
+  while (scheduleCursor < horizon && guard++ < 2000) {
+    if (scheduleCursor >= ctx.currentTime) {
+      scheduleOne(scheduleCursor);
+    }
+    scheduleCursor += m + n;
+  }
+}
+
+function pump() {
+  scheduleAhead();
+}
+
+function cancelFutureEvents(now) {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].start > now) {
+      try { events[i].src.stop(); } catch (e) {}
+      events.splice(i, 1);
+    }
+  }
+}
+
+// 参数改变时重新排程：让正在播放的那一轮播完，之后按新参数走
+function reschedule() {
+  if (!running || !ctx) return;
+  const now = ctx.currentTime;
+  const { n } = getParams();
+  let base = now;
+  for (const ev of events) {
+    if (ev.start <= now) base = Math.max(base, ev.end + n);
+  }
+  cancelFutureEvents(now);
+  scheduleCursor = base;
+  scheduleAhead();
+}
+
+// ---------- 开始 / 停止 ----------
+async function start() {
+  if (!buffer) return;
+  ensureCtx();
+  try { await ctx.resume(); } catch (e) {}
+
+  const { m, n } = getParams();
+  running = true;
+  events = [];
+  roundsDone = 0;
+  runStartAudio = ctx.currentTime;
+  scheduleCursor = ctx.currentTime + 0.15;   // 留一点余量再开第一声
+
+  scheduleAhead();
+  pumpTimer = setInterval(pump, PUMP_MS);
+  uiTimer = setInterval(tickUI, 100);
+  tickUI();
+
+  startBtn.disabled = true;
+  stopBtn.disabled = false;
+  testBtn.disabled = true;
+  playSecEl.disabled = gapSecEl.disabled = true;
+
+  const ok = await acquireWakeLock();
+  if (!ok && window.isSecureContext) {
+    showNotice("没能拿到屏幕唤醒锁，屏幕可能会自动熄灭。" +
+      "建议把系统设置里的<b>屏幕超时</b>调到最长，并插着充电器。", "");
+  } else if (!window.isSecureContext) {
+    showNotice("当前是 <b>HTTP 访问</b>，浏览器不允许网页保持屏幕常亮，" +
+      "所以屏幕到时间仍会自动熄灭。<br>两个办法：把系统<b>屏幕超时</b>调到最长（部分机型有「永不」），" +
+      "或者改用 HTTPS 地址打开本页。", "");
+  } else {
+    showNotice("运行中。保持页面在前台，不要手动锁屏，否则播放会停。", "ok");
+  }
+}
+
+function stop(silent) {
+  running = false;
+  if (pumpTimer) { clearInterval(pumpTimer); pumpTimer = null; }
+  if (uiTimer) { clearInterval(uiTimer); uiTimer = null; }
+
+  const now = ctx ? ctx.currentTime : 0;
+  for (const ev of events) {
+    try { ev.src.stop(); } catch (e) {}
+  }
+  events = [];
+
+  releaseWakeLock();
+
+  startBtn.disabled = !buffer;
+  stopBtn.disabled = true;
+  testBtn.disabled = !buffer;
+  playSecEl.disabled = gapSecEl.disabled = false;
+
+  stateLabel.textContent = "已停止";
+  bigTimer.textContent = "--";
+  bigTimer.className = "big-timer";
+  timerHint.textContent = "等待开始";
+  if (!silent) showNotice("已停止。", "");
+}
+
+// 试听一次
+async function testOnce() {
+  if (!buffer) return;
+  ensureCtx();
+  try { await ctx.resume(); } catch (e) {}
+  const { m } = getParams();
+  const t = ctx.currentTime + 0.05;
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  const gain = ctx.createGain();
+  src.connect(gain); gain.connect(ctx.destination);
+  const f = Math.min(FADE, m / 4);
+  gain.gain.setValueAtTime(0, t);
+  gain.gain.linearRampToValueAtTime(1, t + f);
+  gain.gain.setValueAtTime(1, t + m - f);
+  gain.gain.linearRampToValueAtTime(0, t + m);
+  if (loopModeEl.checked) { src.loop = true; src.start(t, 0); src.stop(t + m); }
+  else { src.start(t, 0, m); }
+}
+
+// ---------- 界面刷新 ----------
+function tickUI() {
+  if (!running || !ctx) return;
+  const now = ctx.currentTime;
+  const { m, n } = getParams();
+
+  // 丢掉已结束的事件
+  while (events.length && events[0].end <= now) events.shift();
+
+  const elapsed = now - runStartAudio;
+  elapsedEl.textContent = fmtClock(elapsed);
+
+  if (events.length && events[0].start <= now) {
+    // 正在播放
+    const left = events[0].end - now;
+    stateLabel.textContent = "正在播放";
+    bigTimer.textContent = left.toFixed(1);
+    bigTimer.className = "big-timer playing";
+    timerHint.textContent = "本轮剩余秒数";
+  } else {
+    // 静默期
+    let nextStart = events.length ? events[0].start : null;
+    if (nextStart === null) {
+      stateLabel.textContent = "排程中";
+      bigTimer.textContent = "--";
+      bigTimer.className = "big-timer";
+      timerHint.textContent = "";
+    } else {
+      const left = Math.max(0, nextStart - now);
+      stateLabel.textContent = "静默中";
+      bigTimer.textContent = left.toFixed(1);
+      bigTimer.className = "big-timer waiting";
+      timerHint.textContent = "距离下次播放";
+    }
+  }
+
+  // 已完成轮数：用音频时钟估算
+  roundsDone = Math.max(0, Math.floor((now - runStartAudio + 0.001) / (m + n)));
+  roundsEl.textContent = String(roundsDone);
+}
+
+// ---------- 事件绑定 ----------
+startBtn.addEventListener("click", start);
+stopBtn.addEventListener("click", () => stop(false));
+testBtn.addEventListener("click", testOnce);
+
+[playSecEl, gapSecEl].forEach(el => {
+  el.addEventListener("change", () => {
+    if (running) reschedule();
+    updateLoopDesc();
+  });
+});
+loopModeEl.addEventListener("change", () => {
+  if (running) reschedule();
+  updateLoopDesc();
+});
+
+function updateLoopDesc() {
+  const { m } = getParams();
+  const desc = $("loopDesc");
+  if (buffer && buffer.duration < m) {
+    desc.textContent = loopModeEl.checked
+      ? "素材 " + fmtDur(buffer.duration) + " 不足 " + m + " 秒，将循环补齐"
+      : "素材 " + fmtDur(buffer.duration) + " 播完即静音，本轮不足 " + m + " 秒";
+  } else {
+    desc.textContent = "素材不足播放时长时自动循环";
+  }
+}
+
+// 页面被切走时提醒
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden" && running) {
+    showNotice("页面已切到后台，浏览器会暂停音频并释放唤醒锁。" +
+      "请切回本页面继续。", "err");
+  }
+});
+
+// 离开页面时停掉
+window.addEventListener("pagehide", () => { if (running) stop(true); });
+
+// 启动自检
+(function init() {
+  if (!window.isSecureContext) {
+    showNotice("当前地址不是安全上下文（HTTP 访问）。播放功能正常，" +
+      "但浏览器不允许网页阻止屏幕熄灭。<br>解决办法：把系统<b>屏幕超时</b>调到最长，" +
+      "或改用 HTTPS 地址打开。", "");
+  } else if (!("wakeLock" in navigator)) {
+    showNotice("这个浏览器不支持屏幕唤醒锁，请把系统<b>屏幕超时</b>调到最长。", "");
+  }
+})();
+</script>
+</body>
+</html>

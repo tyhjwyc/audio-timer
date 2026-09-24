@@ -1,0 +1,17 @@
+# 证书与私钥：绝不入库
+cert.pfx
+cert.pem
+key.pem
+*.pfx
+*.p12
+*.key
+
+# 临时与调试文件
+_known_hosts_test
+_syntax_check.js
+**/_*.mjs
+
+# 系统文件
+Thumbs.db
+desktop.ini
+.DS_Store
