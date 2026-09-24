@@ -11,6 +11,10 @@ _known_hosts_test
 _syntax_check.js
 **/_*.mjs
 
+# 本机 git SSH 包装与 known_hosts
+ssh-git.cmd
+.known_hosts
+
 # 系统文件
 Thumbs.db
 desktop.ini
