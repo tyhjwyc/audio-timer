@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0b">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>频率声音播放器</title>
+<style>
+  :root {
+    --bg: #0a0a0b;
+    --panel: #16161a;
+    --panel2: #1e1e24;
+    --line: #2a2a32;
+    --text: #e8e8ea;
+    --dim: #8b8b96;
+    --accent: #34c759;
+    --accent-dim: #1e6b33;
+    --danger: #ff453a;
+    --warn: #ffd60a;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 16px; line-height: 1.5;
+    overscroll-behavior: none;
+  }
+  body {
+    min-height: 100vh;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .wrap { width: 100%; max-width: 520px; }
+
+  h1 { font-size: 20px; font-weight: 600; margin: 8px 0 20px; text-align: center; letter-spacing: 0.02em; }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px; margin-bottom: 14px;
+  }
+  .card-label { font-size: 13px; color: var(--dim); margin-bottom: 10px; letter-spacing: 0.04em; }
+
+  /* 频率显示 */
+  .freq-display {
+    text-align: center; padding: 8px 0 4px;
+  }
+  .freq-value {
+    font-size: 56px; font-weight: 700; font-variant-numeric: tabular-nums;
+    line-height: 1.1; letter-spacing: -0.03em;
+  }
+  .freq-unit { font-size: 20px; color: var(--dim); font-weight: 500; }
+
+  /* 滑块 */
+  .freq-slider-wrap { padding: 4px 0 8px; }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 6px; border-radius: 3px;
+    background: var(--line); outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent); cursor: pointer; border: none;
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent); cursor: pointer; border: none;
+  }
+
+  /* 波形选择 */
+  .wave-row {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  }
+  .wave-btn {
+    min-height: 44px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--panel2); color: var(--text);
+    font-size: 14px; font-weight: 500; cursor: pointer;
+    transition: background .15s, border-color .15s;
+    font-family: inherit;
+  }
+  .wave-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+  .wave-btn:active { background: #26262e; }
+
+  /* 预设频率 */
+  .presets {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+  }
+  .preset-btn {
+    min-height: 32px; padding: 0 12px;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel2); color: var(--dim);
+    font-size: 12px; cursor: pointer; font-family: inherit;
+    transition: border-color .15s, color .15s;
+  }
+  .preset-btn:hover { border-color: var(--accent); color: var(--text); }
+  .preset-btn:active { background: #26262e; }
+
+  /* 参数 */
+  .params { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 13px; color: var(--dim); }
+  .field .unit { font-size: 12px; color: #5c5c66; }
+  input[type=number] {
+    width: 100%; min-height: 50px;
+    background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 10px; color: var(--text);
+    font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums;
+    text-align: center; padding: 0 8px;
+    -moz-appearance: textfield;
+  }
+  input[type=number]:focus { outline: none; border-color: var(--accent); }
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+  .switch-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line);
+  }
+  .switch-row .sw-label { font-size: 14px; }
+  .switch-row .sw-desc { font-size: 12px; color: var(--dim); margin-top: 2px; }
+  .switch { position: relative; width: 50px; height: 30px; flex: 0 0 auto; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0; background: #33333d;
+    border-radius: 15px; transition: background .2s; cursor: pointer;
+  }
+  .slider::before {
+    content: ""; position: absolute; width: 24px; height: 24px;
+    left: 3px; top: 3px; background: #fff; border-radius: 50%;
+    transition: transform .2s;
+  }
+  .switch input:checked + .slider { background: var(--accent); }
+  .switch input:checked + .slider::before { transform: translateX(20px); }
+
+  /* 控制按钮 */
+  .controls { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .btn {
+    min-height: 60px; border: none; border-radius: 12px;
+    font-size: 18px; font-weight: 600; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    transition: opacity .15s, transform .1s;
+    font-family: inherit;
+  }
+  .btn:active { transform: scale(0.985); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn-start { background: var(--accent); color: #04140a; }
+  .btn-stop { background: var(--danger); color: #fff; }
+  .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .btn-test { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
+
+  /* 状态 */
+  .status-card { text-align: center; }
+  .big-timer {
+    font-size: 52px; font-weight: 700; font-variant-numeric: tabular-nums;
+    line-height: 1.1; letter-spacing: -0.02em;
+    margin: 4px 0 2px;
+  }
+  .big-timer.playing { color: var(--accent); }
+  .big-timer.waiting { color: var(--warn); }
+  .big-label { font-size: 13px; color: var(--dim); letter-spacing: 0.06em; }
+  .meta { display: flex; justify-content: space-around; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .meta div { font-size: 13px; color: var(--dim); }
+  .meta b { display: block; font-size: 17px; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+
+  /* 提示条 */
+  .notice {
+    font-size: 13px; line-height: 1.65; color: var(--dim);
+    background: var(--panel); border: 1px solid var(--line);
+    border-left: 3px solid var(--warn);
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 14px;
+  }
+  .notice b { color: var(--text); font-weight: 600; }
+  .notice.err { border-left-color: var(--danger); }
+  .notice.ok { border-left-color: var(--accent); }
+  .notice:empty { display: none; }
+
+  .hidden { display: none !important; }
+
+  /* 幅度控制 */
+  .amp-row {
+    display: flex; align-items: center; gap: 10px; margin-top: 10px;
+  }
+  .amp-row .sw-label { font-size: 14px; flex: 0 0 auto; min-width: 60px; }
+  .amp-row input[type=range] { flex: 1; }
+  .amp-val {
+    font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;
+    color: var(--accent); min-width: 48px; text-align: right;
+  }
+  .amp-presets {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+  }
+  .amp-preset-btn {
+    min-height: 32px; padding: 0 12px;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel2); color: var(--dim);
+    font-size: 12px; cursor: pointer; font-family: inherit;
+    transition: border-color .15s, color .15s;
+  }
+  .amp-preset-btn:hover { border-color: var(--accent); color: var(--text); }
+  .amp-preset-btn:active { background: #26262e; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>频率声音播放器</h1>
+
+  <div id="notice" class="notice hidden"></div>
+
+  <!-- 频率控制 -->
+  <div class="card">
+    <div class="card-label">频率</div>
+    <div class="freq-display">
+      <span class="freq-value" id="freqValue">440</span>
+      <span class="freq-unit">Hz</span>
+    </div>
+    <div class="freq-slider-wrap">
+      <input type="range" id="freqSlider" min="0" max="1000" value="693" step="1">
+    </div>
+    <div class="card-label" style="margin-top:0">波形</div>
+    <div class="wave-row">
+      <button class="wave-btn active" data-wave="sine">正弦</button>
+      <button class="wave-btn" data-wave="square">方波</button>
+      <button class="wave-btn" data-wave="sawtooth">锯齿</button>
+      <button class="wave-btn" data-wave="triangle">三角</button>
+    </div>
+    <div class="presets" id="presets"></div>
+  </div>
+
+  <!-- 播放参数 -->
+  <div class="card">
+    <div class="card-label">播放参数</div>
+    <div class="params">
+      <div class="field">
+        <label for="playSec">播放时长</label>
+        <input type="number" id="playSec" value="3" min="0.5" step="0.5" inputmode="decimal">
+        <span class="unit">秒（每轮响这么久）</span>
+      </div>
+      <div class="field">
+        <label for="gapSec">间隔时长</label>
+        <input type="number" id="gapSec" value="30" min="0" step="0.5" inputmode="decimal">
+        <span class="unit">秒（从上次结束算起）</span>
+      </div>
+    </div>
+    <div class="switch-row">
+      <div>
+        <div class="sw-label">循环播放</div>
+        <div class="sw-desc" id="loopDesc">播放完等间隔后自动再响</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="loopMode" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="amp-row">
+      <span class="sw-label">幅度变化</span>
+      <input type="range" id="ampRange" min="0" max="100" value="0" step="1">
+      <span class="amp-val" id="ampValue">0%</span>
+    </div>
+    <div class="amp-presets" id="ampPresets"></div>
+  </div>
+
+  <!-- 状态 -->
+  <div class="card status-card">
+    <div class="big-label" id="stateLabel">未开始</div>
+    <div class="big-timer" id="bigTimer">--</div>
+    <div class="big-label" id="timerHint">等待开始</div>
+    <div class="meta">
+      <div>已运行<b id="elapsed">0:00</b></div>
+      <div>已完成<b id="rounds">0</b></div>
+      <div>唤醒锁<b id="wakeState">未启用</b></div>
+    </div>
+  </div>
+
+  <!-- 控制 -->
+  <div class="controls">
+    <button class="btn btn-start" id="startBtn">开始播放</button>
+    <div class="btn-row">
+      <button class="btn btn-stop" id="stopBtn" disabled>停止</button>
+      <button class="btn btn-test" id="testBtn">试听一次</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+
+// ---------- 状态 ----------
+let ctx = null;
+let running = false;
+let events = [];                // {start, end, osc, gain}
+let scheduleCursor = 0;
+let runStartAudio = 0;
+let roundsDone = 0;
+let wakeLock = null;
+let pumpTimer = null;
+let uiTimer = null;
+
+const LOOKAHEAD = 30;
+const PUMP_MS = 5000;
+const FADE = 0.008;
+
+// ---------- 元素 ----------
+const $ = id => document.getElementById(id);
+const freqSlider = $("freqSlider");
+const freqValueEl = $("freqValue");
+const playSecEl = $("playSec");
+const gapSecEl = $("gapSec");
+const loopModeEl = $("loopMode");
+const ampRangeEl = $("ampRange");
+const ampValueEl = $("ampValue");
+const startBtn = $("startBtn");
+const stopBtn = $("stopBtn");
+const testBtn = $("testBtn");
+const stateLabel = $("stateLabel");
+const bigTimer = $("bigTimer");
+const timerHint = $("timerHint");
+const elapsedEl = $("elapsed");
+const roundsEl = $("rounds");
+const wakeStateEl = $("wakeState");
+const noticeEl = $("notice");
+
+// ---------- 频率 ----------
+let currentFreq = 440;
+let currentWave = "sine";
+
+// 对数映射：slider 0~1000 → 20Hz~30000Hz
+function sliderToFreq(v) {
+  const t = v / 1000;
+  return Math.round(20 * Math.pow(30000 / 20, t));
+}
+
+function freqToSlider(f) {
+  const t = Math.log(f / 20) / Math.log(30000 / 20);
+  return Math.round(t * 1000);
+}
+
+function fmtFreq(hz) {
+  if (hz >= 1000) return (hz / 1000).toFixed(hz % 1000 === 0 ? 0 : 2) + "k";
+  return String(hz);
+}
+
+function updateFreqDisplay() {
+  freqValueEl.textContent = fmtFreq(currentFreq);
+}
+
+// ---------- 预设频率 ----------
+const PRESETS = [
+  { label: "20", hz: 20 },
+  { label: "40", hz: 40 },
+  { label: "60", hz: 60 },
+  { label: "80", hz: 80 },
+  { label: "100", hz: 100 },
+  { label: "200", hz: 200 },
+  { label: "400", hz: 400 },
+  { label: "600", hz: 600 },
+  { label: "800", hz: 800 },
+  { label: "1k", hz: 1000 },
+  { label: "2k", hz: 2000 },
+  { label: "4k", hz: 4000 },
+  { label: "6k", hz: 6000 },
+  { label: "8k", hz: 8000 },
+  { label: "10k", hz: 10000 },
+  { label: "12k", hz: 12000 },
+  { label: "14k", hz: 14000 },
+  { label: "16k", hz: 16000 },
+  { label: "18k", hz: 18000 },
+  { label: "20k", hz: 20000 },
+];
+
+function buildPresets() {
+  const wrap = $("presets");
+  wrap.innerHTML = "";
+  PRESETS.forEach(p => {
+    const btn = document.createElement("button");
+    btn.className = "preset-btn";
+    btn.textContent = p.label;
+    btn.addEventListener("click", () => setFreq(p.hz));
+    wrap.appendChild(btn);
+  });
+}
+
+function setFreq(hz) {
+  currentFreq = Math.max(20, Math.min(30000, Math.round(hz)));
+  freqSlider.value = freqToSlider(currentFreq);
+  updateFreqDisplay();
+}
+
+// ---------- 波形 ----------
+document.querySelectorAll(".wave-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".wave-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentWave = btn.dataset.wave;
+  });
+});
+
+// ---------- 滑块 ----------
+freqSlider.addEventListener("input", () => {
+  currentFreq = sliderToFreq(parseInt(freqSlider.value));
+  updateFreqDisplay();
+});
+
+// ---------- 工具 ----------
+function showNotice(html, kind) {
+  noticeEl.className = "notice" + (kind ? " " + kind : "");
+  noticeEl.innerHTML = html;
+  noticeEl.classList.remove("hidden");
+}
+
+function fmtClock(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const mm = String(m).padStart(h ? 2 : 1, "0");
+  const ss = String(s).padStart(2, "0");
+  return h ? h + ":" + mm + ":" + ss : mm + ":" + ss;
+}
+
+function fmtDur(sec) {
+  if (!isFinite(sec)) return "--";
+  if (sec < 60) return sec.toFixed(1).replace(/\.0$/, "") + " 秒";
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return m + " 分 " + s + " 秒";
+}
+
+function getParams() {
+  const m = parseFloat(playSecEl.value);
+  const n = parseFloat(gapSecEl.value);
+  const a = parseFloat(ampRangeEl.value);
+  return {
+    m: (isFinite(m) && m > 0) ? m : 3,
+    n: (isFinite(n) && n >= 0) ? n : 0,
+    a: (isFinite(a) && a >= 0) ? a : 0
+  };
+}
+
+// ---------- 音频上下文 ----------
+function ensureCtx() {
+  if (!ctx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) throw new Error("这个浏览器不支持 Web Audio");
+    ctx = new AC();
+  }
+  return ctx;
+}
+
+// ---------- 调度核心 ----------
+function scheduleOne(t) {
+  const { m, a } = getParams();
+  const osc = ctx.createOscillator();
+  osc.type = currentWave;
+  osc.frequency.setValueAtTime(currentFreq, t);
+
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+
+  // 随机幅度：每轮播放幅度在 [1 - a/100, 1] 之间随机
+  const amp = a > 0 ? (1 - a / 100 + Math.random() * (a / 100)) : 1;
+
+  const f = Math.min(FADE, m / 4);
+  gain.gain.setValueAtTime(0, t);
+  gain.gain.linearRampToValueAtTime(amp, t + f);
+  gain.gain.setValueAtTime(amp, t + m - f);
+  gain.gain.linearRampToValueAtTime(0, t + m);
+
+  osc.start(t);
+  osc.stop(t + m);
+
+  const ev = { start: t, end: t + m, osc: osc, gain: gain };
+  events.push(ev);
+  osc.onended = () => {
+    const i = events.indexOf(ev);
+    if (i >= 0) events.splice(i, 1);
+  };
+}
+
+function scheduleAhead() {
+  if (!running) return;
+  const { m, n } = getParams();
+  const horizon = ctx.currentTime + LOOKAHEAD;
+  let guard = 0;
+  while (scheduleCursor < horizon && guard++ < 2000) {
+    if (scheduleCursor >= ctx.currentTime) {
+      scheduleOne(scheduleCursor);
+    }
+    scheduleCursor += m + n;
+  }
+}
+
+function pump() {
+  scheduleAhead();
+}
+
+function cancelFutureEvents(now) {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].start > now) {
+      try { events[i].osc.stop(); } catch (e) {}
+      events.splice(i, 1);
+    }
+  }
+}
+
+function reschedule() {
+  if (!running || !ctx) return;
+  const now = ctx.currentTime;
+  const { n } = getParams();
+  let base = now;
+  for (const ev of events) {
+    if (ev.start <= now) base = Math.max(base, ev.end + n);
+  }
+  cancelFutureEvents(now);
+  scheduleCursor = base;
+  scheduleAhead();
+}
+
+// ---------- 开始 / 停止 ----------
+async function start() {
+  ensureCtx();
+  try { await ctx.resume(); } catch (e) {}
+
+  const { m, n } = getParams();
+  running = true;
+  events = [];
+  roundsDone = 0;
+  runStartAudio = ctx.currentTime;
+  scheduleCursor = ctx.currentTime + 0.15;
+
+  scheduleAhead();
+  pumpTimer = setInterval(pump, PUMP_MS);
+  uiTimer = setInterval(tickUI, 100);
+  tickUI();
+
+  startBtn.disabled = true;
+  stopBtn.disabled = false;
+  testBtn.disabled = true;
+  playSecEl.disabled = gapSecEl.disabled = true;
+
+  const ok = await acquireWakeLock();
+  if (!ok && window.isSecureContext) {
+    showNotice("没能拿到屏幕唤醒锁，屏幕可能会自动熄灭。" +
+      "建议把系统设置里的<b>屏幕超时</b>调到最长，并插着充电器。", "");
+  } else if (!window.isSecureContext) {
+    showNotice("当前是 <b>HTTP 访问</b>，浏览器不允许网页保持屏幕常亮，" +
+      "所以屏幕到时间仍会自动熄灭。<br>两个办法：把系统<b>屏幕超时</b>调到最长（部分机型有「永不」），" +
+      "或者改用 HTTPS 地址打开本页。", "");
+  } else {
+    showNotice("运行中。保持页面在前台，不要手动锁屏，否则播放会停。", "ok");
+  }
+}
+
+function stop(silent) {
+  running = false;
+  if (pumpTimer) { clearInterval(pumpTimer); pumpTimer = null; }
+  if (uiTimer) { clearInterval(uiTimer); uiTimer = null; }
+
+  const now = ctx ? ctx.currentTime : 0;
+  for (const ev of events) {
+    try { ev.osc.stop(); } catch (e) {}
+  }
+  events = [];
+
+  releaseWakeLock();
+
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  testBtn.disabled = false;
+  playSecEl.disabled = gapSecEl.disabled = false;
+
+  stateLabel.textContent = "已停止";
+  bigTimer.textContent = "--";
+  bigTimer.className = "big-timer";
+  timerHint.textContent = "等待开始";
+  if (!silent) showNotice("已停止。", "");
+}
+
+// 试听一次
+async function testOnce() {
+  ensureCtx();
+  try { await ctx.resume(); } catch (e) {}
+  const { m, a } = getParams();
+  const t = ctx.currentTime + 0.05;
+  const osc = ctx.createOscillator();
+  osc.type = currentWave;
+  osc.frequency.setValueAtTime(currentFreq, t);
+  const gain = ctx.createGain();
+  osc.connect(gain); gain.connect(ctx.destination);
+  const amp = a > 0 ? (1 - a / 100 + Math.random() * (a / 100)) : 1;
+  const f = Math.min(FADE, m / 4);
+  gain.gain.setValueAtTime(0, t);
+  gain.gain.linearRampToValueAtTime(amp, t + f);
+  gain.gain.setValueAtTime(amp, t + m - f);
+  gain.gain.linearRampToValueAtTime(0, t + m);
+  osc.start(t);
+  osc.stop(t + m);
+}
+
+// ---------- 唤醒锁 ----------
+async function acquireWakeLock() {
+  if (!("wakeLock" in navigator)) {
+    wakeStateEl.textContent = "不支持";
+    return false;
+  }
+  if (!window.isSecureContext) {
+    wakeStateEl.textContent = "需 HTTPS";
+    return false;
+  }
+  try {
+    wakeLock = await navigator.wakeLock.request("screen");
+    wakeStateEl.textContent = "已启用";
+    wakeLock.addEventListener("release", () => {
+      wakeStateEl.textContent = running ? "已释放" : "未启用";
+    });
+    return true;
+  } catch (err) {
+    wakeStateEl.textContent = "申请失败";
+    return false;
+  }
+}
+
+async function releaseWakeLock() {
+  if (wakeLock) {
+    try { await wakeLock.release(); } catch (e) {}
+    wakeLock = null;
+  }
+  wakeStateEl.textContent = "未启用";
+}
+
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState === "visible" && running) {
+    await acquireWakeLock();
+  }
+});
+
+// ---------- 界面刷新 ----------
+function tickUI() {
+  if (!running || !ctx) return;
+  const now = ctx.currentTime;
+  const { m, n } = getParams();
+
+  while (events.length && events[0].end <= now) events.shift();
+
+  const elapsed = now - runStartAudio;
+  elapsedEl.textContent = fmtClock(elapsed);
+
+  if (events.length && events[0].start <= now) {
+    const left = events[0].end - now;
+    stateLabel.textContent = "正在播放";
+    bigTimer.textContent = left.toFixed(1);
+    bigTimer.className = "big-timer playing";
+    timerHint.textContent = "本轮剩余秒数";
+  } else {
+    let nextStart = events.length ? events[0].start : null;
+    if (nextStart === null) {
+      stateLabel.textContent = "排程中";
+      bigTimer.textContent = "--";
+      bigTimer.className = "big-timer";
+      timerHint.textContent = "";
+    } else {
+      const left = Math.max(0, nextStart - now);
+      stateLabel.textContent = "静默中";
+      bigTimer.textContent = left.toFixed(1);
+      bigTimer.className = "big-timer waiting";
+      timerHint.textContent = "距离下次播放";
+    }
+  }
+
+  roundsDone = Math.max(0, Math.floor((now - runStartAudio + 0.001) / (m + n)));
+  roundsEl.textContent = String(roundsDone);
+}
+
+// ---------- 事件绑定 ----------
+startBtn.addEventListener("click", start);
+stopBtn.addEventListener("click", () => stop(false));
+testBtn.addEventListener("click", testOnce);
+
+[playSecEl, gapSecEl].forEach(el => {
+  el.addEventListener("change", () => {
+    if (running) reschedule();
+  });
+});
+
+loopModeEl.addEventListener("change", () => {
+  if (running) reschedule();
+});
+
+// 幅度变化
+const AMP_PRESETS = [
+  { label: "0%", val: 0 },
+  { label: "5%", val: 5 },
+  { label: "10%", val: 10 },
+  { label: "20%", val: 20 },
+  { label: "30%", val: 30 },
+  { label: "50%", val: 50 },
+  { label: "70%", val: 70 },
+  { label: "100%", val: 100 },
+];
+
+function buildAmpPresets() {
+  const wrap = $("ampPresets");
+  wrap.innerHTML = "";
+  AMP_PRESETS.forEach(p => {
+    const btn = document.createElement("button");
+    btn.className = "amp-preset-btn";
+    btn.textContent = p.label;
+    btn.addEventListener("click", () => {
+      ampRangeEl.value = p.val;
+      updateAmpDisplay();
+    });
+    wrap.appendChild(btn);
+  });
+}
+
+function updateAmpDisplay() {
+  const v = parseInt(ampRangeEl.value);
+  ampValueEl.textContent = v + "%";
+}
+
+ampRangeEl.addEventListener("input", updateAmpDisplay);
+
+// 页面被切走时提醒
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden" && running) {
+    showNotice("页面已切到后台，浏览器会暂停音频并释放唤醒锁。" +
+      "请切回本页面继续。", "err");
+  }
+});
+
+window.addEventListener("pagehide", () => { if (running) stop(true); });
+
+// 启动
+(function init() {
+  buildPresets();
+  buildAmpPresets();
+  freqSlider.value = freqToSlider(currentFreq);
+  updateFreqDisplay();
+  updateAmpDisplay();
+
+  if (!window.isSecureContext) {
+    showNotice("当前地址不是安全上下文（HTTP 访问）。播放功能正常，" +
+      "但浏览器不允许网页阻止屏幕熄灭。<br>解决办法：把系统<b>屏幕超时</b>调到最长，" +
+      "或改用 HTTPS 地址打开。", "");
+  } else if (!("wakeLock" in navigator)) {
+    showNotice("这个浏览器不支持屏幕唤醒锁，请把系统<b>屏幕超时</b>调到最长。", "");
+  }
+})();
+</script>
+</body>
+</html>
