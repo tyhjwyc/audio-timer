@@ -201,6 +201,35 @@
   }
   .amp-preset-btn:hover { border-color: var(--accent); color: var(--text); }
   .amp-preset-btn:active { background: #26262e; }
+
+  /* 通道卡片 */
+  .ch-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .ch-title { font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
+  .ch-sub { font-size: 12px; color: var(--dim); margin-top: 2px; }
+  .ch-body { transition: opacity .2s; }
+  .ch-body.off { opacity: 0.4; pointer-events: none; }
+
+  /* 文件选择 */
+  .file-btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; min-height: 52px;
+    background: var(--panel2); border: 1px dashed var(--line);
+    border-radius: 10px; color: var(--text);
+    font-size: 15px; cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .file-btn:active { background: #26262e; }
+  .file-btn.has-file { border-style: solid; border-color: var(--accent-dim); }
+  input[type=file] { display: none; }
+  .file-info { margin-top: 10px; font-size: 13px; color: var(--dim); word-break: break-all; }
+  .file-info b { color: var(--text); font-weight: 500; }
+
+  /* 通道状态行 */
+  .ch-lines { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .ch-line { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 3px 0; color: var(--dim); }
+  .ch-line b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+  .ch-line b.playing { color: var(--accent); }
+  .ch-line b.waiting { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -210,58 +239,117 @@
 
   <div id="notice" class="notice hidden"></div>
 
-  <!-- 频率控制 -->
+  <!-- 正弦波通道 -->
   <div class="card">
-    <div class="card-label">频率</div>
-    <div class="freq-display">
-      <span class="freq-value" id="freqValue">440</span>
-      <span class="freq-unit">Hz</span>
-    </div>
-    <div class="freq-slider-wrap">
-      <input type="range" id="freqSlider" min="0" max="1000" value="693" step="1">
-    </div>
-    <div class="card-label" style="margin-top:0">波形</div>
-    <div class="wave-row">
-      <button class="wave-btn active" data-wave="sine">正弦</button>
-      <button class="wave-btn" data-wave="square">方波</button>
-      <button class="wave-btn" data-wave="sawtooth">锯齿</button>
-      <button class="wave-btn" data-wave="triangle">三角</button>
-    </div>
-    <div class="presets" id="presets"></div>
-  </div>
-
-  <!-- 播放参数 -->
-  <div class="card">
-    <div class="card-label">播放参数</div>
-    <div class="params">
-      <div class="field">
-        <label for="playSec">播放时长</label>
-        <input type="number" id="playSec" value="3" min="0.5" step="0.5" inputmode="decimal">
-        <span class="unit">秒（每轮响这么久）</span>
-      </div>
-      <div class="field">
-        <label for="gapSec">间隔时长</label>
-        <input type="number" id="gapSec" value="30" min="0" step="0.5" inputmode="decimal">
-        <span class="unit">秒（从上次结束算起）</span>
-      </div>
-    </div>
-    <div class="switch-row">
+    <div class="ch-head">
       <div>
-        <div class="sw-label">循环播放</div>
-        <div class="sw-desc" id="loopDesc">播放完等间隔后自动再响</div>
+        <div class="ch-title">正弦波通道</div>
+        <div class="ch-sub">按 Hz 出纯音，波形可换</div>
       </div>
       <label class="switch">
-        <input type="checkbox" id="loopMode" checked>
+        <input type="checkbox" id="oscOn" checked>
         <span class="slider"></span>
       </label>
     </div>
+    <div class="ch-body" id="oscBody">
+      <div class="card-label">频率</div>
+      <div class="freq-display">
+        <span class="freq-value" id="freqValue">440</span>
+        <span class="freq-unit">Hz</span>
+      </div>
+      <div class="freq-slider-wrap">
+        <input type="range" id="freqSlider" min="0" max="1000" value="693" step="1">
+      </div>
+      <div class="card-label" style="margin-top:0">波形</div>
+      <div class="wave-row">
+        <button class="wave-btn active" data-wave="sine">正弦</button>
+        <button class="wave-btn" data-wave="square">方波</button>
+        <button class="wave-btn" data-wave="sawtooth">锯齿</button>
+        <button class="wave-btn" data-wave="triangle">三角</button>
+      </div>
+      <div class="presets" id="presets"></div>
 
-    <div class="amp-row">
-      <span class="sw-label">幅度变化</span>
-      <input type="range" id="ampRange" min="0" max="100" value="0" step="1">
-      <span class="amp-val" id="ampValue">0%</span>
+      <div class="card-label" style="margin-top:16px">播放参数</div>
+      <div class="params">
+        <div class="field">
+          <label for="oscPlaySec">播放时长</label>
+          <input type="number" id="oscPlaySec" value="3" min="0.5" step="0.5" inputmode="decimal">
+          <span class="unit">秒（每轮响这么久）</span>
+        </div>
+        <div class="field">
+          <label for="oscGapSec">间隔时长</label>
+          <input type="number" id="oscGapSec" value="30" min="0" step="0.5" inputmode="decimal">
+          <span class="unit">秒（从上次结束算起）</span>
+        </div>
+      </div>
+      <div class="switch-row">
+        <div>
+          <div class="sw-label">循环播放</div>
+          <div class="sw-desc" id="oscLoopDesc">播放完等间隔后自动再响</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="oscLoop" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="amp-row">
+        <span class="sw-label">幅度变化</span>
+        <input type="range" id="ampRange" min="0" max="100" value="0" step="1">
+        <span class="amp-val" id="ampValue">0%</span>
+      </div>
+      <div class="amp-presets" id="ampPresets"></div>
     </div>
-    <div class="amp-presets" id="ampPresets"></div>
+  </div>
+
+  <!-- 音频通道 -->
+  <div class="card">
+    <div class="ch-head">
+      <div>
+        <div class="ch-title">音频通道</div>
+        <div class="ch-sub">播放手机里的音频文件</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="audOn">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="ch-body off" id="audBody">
+      <label class="file-btn" id="fileBtn" for="fileInput">
+        <span id="fileBtnText">选择手机里的音频文件</span>
+      </label>
+      <input type="file" id="fileInput" accept="audio/*">
+      <div class="file-info hidden" id="fileInfo"></div>
+
+      <div class="card-label" style="margin-top:16px">播放参数</div>
+      <div class="params">
+        <div class="field">
+          <label for="audPlaySec">播放时长</label>
+          <input type="number" id="audPlaySec" value="3" min="0.5" step="0.5" inputmode="decimal">
+          <span class="unit">秒（每轮响这么久）</span>
+        </div>
+        <div class="field">
+          <label for="audGapSec">间隔时长</label>
+          <input type="number" id="audGapSec" value="30" min="0" step="0.5" inputmode="decimal">
+          <span class="unit">秒（从上次结束算起）</span>
+        </div>
+      </div>
+      <div class="switch-row">
+        <div>
+          <div class="sw-label">循环播放</div>
+          <div class="sw-desc" id="audLoopDesc">播放完等间隔后自动再响</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="audLoop" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="amp-row">
+        <span class="sw-label">音量</span>
+        <input type="range" id="audVol" min="0" max="100" value="80" step="1">
+        <span class="amp-val" id="audVolValue">80%</span>
+      </div>
+    </div>
   </div>
 
   <!-- 状态 -->
@@ -269,9 +357,12 @@
     <div class="big-label" id="stateLabel">未开始</div>
     <div class="big-timer" id="bigTimer">--</div>
     <div class="big-label" id="timerHint">等待开始</div>
+    <div class="ch-lines">
+      <div class="ch-line"><span>正弦波</span><b id="oscLine">已关闭</b></div>
+      <div class="ch-line"><span>音频</span><b id="audLine">已关闭</b></div>
+    </div>
     <div class="meta">
       <div>已运行<b id="elapsed">0:00</b></div>
-      <div>已完成<b id="rounds">0</b></div>
       <div>唤醒锁<b id="wakeState">未启用</b></div>
     </div>
   </div>
@@ -292,26 +383,50 @@
 
 // ---------- 状态 ----------
 let ctx = null;
+let limiter = null;             // 两通道共用限幅器，防叠加削波
+let audVolGain = null;          // 音频通道音量，改动实时生效
 let running = false;
-let events = [];                // {start, end, osc, gain}
-let scheduleCursor = 0;
 let runStartAudio = 0;
-let roundsDone = 0;
 let wakeLock = null;
 let pumpTimer = null;
 let uiTimer = null;
+let audioBuffer = null;
+
+const CH_NAME = { osc: "正弦波", aud: "音频" };
+const CH_KEYS = ["osc", "aud"];
+// 每通道一条独立时间轴：events 只放本通道的播放点，cursor 是下一轮排程位置
+const chans = {
+  osc: { enabled: true, events: [], cursor: 0, rounds: 0 },
+  aud: { enabled: false, events: [], cursor: 0, rounds: 0 }
+};
 
 const LOOKAHEAD = 30;
 const PUMP_MS = 5000;
 const FADE = 0.008;
+const LEAD = 0.15;              // 开始后留一点余量再开第一声
 
 // ---------- 元素 ----------
 const $ = id => document.getElementById(id);
 const freqSlider = $("freqSlider");
 const freqValueEl = $("freqValue");
-const playSecEl = $("playSec");
-const gapSecEl = $("gapSec");
-const loopModeEl = $("loopMode");
+const oscOnEl = $("oscOn");
+const oscBodyEl = $("oscBody");
+const oscPlaySecEl = $("oscPlaySec");
+const oscGapSecEl = $("oscGapSec");
+const oscLoopEl = $("oscLoop");
+const oscLoopDescEl = $("oscLoopDesc");
+const audOnEl = $("audOn");
+const audBodyEl = $("audBody");
+const audPlaySecEl = $("audPlaySec");
+const audGapSecEl = $("audGapSec");
+const audLoopEl = $("audLoop");
+const audLoopDescEl = $("audLoopDesc");
+const audVolEl = $("audVol");
+const audVolValueEl = $("audVolValue");
+const fileInput = $("fileInput");
+const fileBtn = $("fileBtn");
+const fileBtnText = $("fileBtnText");
+const fileInfo = $("fileInfo");
 const ampRangeEl = $("ampRange");
 const ampValueEl = $("ampValue");
 const startBtn = $("startBtn");
@@ -321,7 +436,8 @@ const stateLabel = $("stateLabel");
 const bigTimer = $("bigTimer");
 const timerHint = $("timerHint");
 const elapsedEl = $("elapsed");
-const roundsEl = $("rounds");
+const oscLineEl = $("oscLine");
+const audLineEl = $("audLine");
 const wakeStateEl = $("wakeState");
 const noticeEl = $("notice");
 
@@ -428,68 +544,117 @@ function fmtDur(sec) {
   return m + " 分 " + s + " 秒";
 }
 
-function getParams() {
-  const m = parseFloat(playSecEl.value);
-  const n = parseFloat(gapSecEl.value);
-  const a = parseFloat(ampRangeEl.value);
+function readSec(el, fallback) {
+  const v = parseFloat(el.value);
+  return (isFinite(v) && v >= 0.5) ? v : fallback;
+}
+
+function paramsOf(key) {
+  if (key === "osc") {
+    const a = parseFloat(ampRangeEl.value);
+    return {
+      m: readSec(oscPlaySecEl, 3),
+      n: (parseFloat(oscGapSecEl.value) >= 0) ? parseFloat(oscGapSecEl.value) : 0,
+      a: (isFinite(a) && a >= 0) ? a : 0
+    };
+  }
   return {
-    m: (isFinite(m) && m > 0) ? m : 3,
-    n: (isFinite(n) && n >= 0) ? n : 0,
-    a: (isFinite(a) && a >= 0) ? a : 0
+    m: readSec(audPlaySecEl, 3),
+    n: (parseFloat(audGapSecEl.value) >= 0) ? parseFloat(audGapSecEl.value) : 0
   };
 }
 
-// ---------- 音频上下文 ----------
+function loopOf(key) {
+  return key === "osc" ? oscLoopEl.checked : audLoopEl.checked;
+}
+
+function volOf() {
+  const v = parseFloat(audVolEl.value);
+  return (isFinite(v) && v >= 0) ? Math.min(100, v) / 100 : 0.8;
+}
+
+// 两通道汇入同一个限幅器再出，防同时响时峰值削波
 function ensureCtx() {
   if (!ctx) {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) throw new Error("这个浏览器不支持 Web Audio");
     ctx = new AC();
+    limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -1;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.25;
+    limiter.connect(ctx.destination);
+    audVolGain = ctx.createGain();
+    audVolGain.gain.value = volOf();
+    audVolGain.connect(limiter);
   }
   return ctx;
 }
 
 // ---------- 调度核心 ----------
-function scheduleOne(t) {
-  const { m, a } = getParams();
-  const osc = ctx.createOscillator();
-  osc.type = currentWave;
-  osc.frequency.setValueAtTime(currentFreq, t);
-
+// 包络固定：起点 0，FADE 内升到 level，末尾 FADE 内落回 0，切在波形中间也不爆音
+function makeEvent(key, node, out, start, m, level) {
   const gain = ctx.createGain();
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-
-  // 随机幅度：每轮播放幅度在 [1 - a/100, 1] 之间随机
-  const amp = a > 0 ? (1 - a / 100 + Math.random() * (a / 100)) : 1;
+  node.connect(gain);
+  gain.connect(out);
 
   const f = Math.min(FADE, m / 4);
-  gain.gain.setValueAtTime(0, t);
-  gain.gain.linearRampToValueAtTime(amp, t + f);
-  gain.gain.setValueAtTime(amp, t + m - f);
-  gain.gain.linearRampToValueAtTime(0, t + m);
+  gain.gain.setValueAtTime(0, start);
+  gain.gain.linearRampToValueAtTime(level, start + f);
+  gain.gain.setValueAtTime(level, start + m - f);
+  gain.gain.linearRampToValueAtTime(0, start + m);
 
-  osc.start(t);
-  osc.stop(t + m);
+  node.start(start);
+  node.stop(start + m);
 
-  const ev = { start: t, end: t + m, osc: osc, gain: gain };
-  events.push(ev);
-  osc.onended = () => {
-    const i = events.indexOf(ev);
-    if (i >= 0) events.splice(i, 1);
+  const ch = chans[key];
+  const ev = { start: start, end: start + m, node: node, gain: gain };
+  ch.events.push(ev);
+  node.onended = () => {
+    const i = ch.events.indexOf(ev);
+    if (i >= 0) ch.events.splice(i, 1);
   };
+  return ev;
+}
+
+function scheduleOne(key, t) {
+  const { m } = paramsOf(key);
+  if (key === "osc") {
+    const { a } = paramsOf("osc");
+    const osc = ctx.createOscillator();
+    osc.type = currentWave;
+    osc.frequency.setValueAtTime(currentFreq, t);
+    // 随机幅度：每轮在 [1 - a/100, 1] 之间取一个
+    const amp = a > 0 ? (1 - a / 100 + Math.random() * (a / 100)) : 1;
+    makeEvent("osc", osc, limiter, t, m, amp);
+    return;
+  }
+  if (!audioBuffer) return;
+  const src = ctx.createBufferSource();
+  src.buffer = audioBuffer;
+  // 素材短于播放时长就循环补齐，长于播放时长就播到 M 秒切断
+  src.loop = true;
+  makeEvent("aud", src, audVolGain, t, m, 1);
 }
 
 function scheduleAhead() {
-  if (!running) return;
-  const { m, n } = getParams();
-  const horizon = ctx.currentTime + LOOKAHEAD;
-  let guard = 0;
-  while (scheduleCursor < horizon && guard++ < 2000) {
-    if (scheduleCursor >= ctx.currentTime) {
-      scheduleOne(scheduleCursor);
+  if (!running || !ctx) return;
+  const now = ctx.currentTime;
+  const horizon = now + LOOKAHEAD;
+  for (const key of CH_KEYS) {
+    const ch = chans[key];
+    if (!ch.enabled) continue;
+    if (key === "aud" && !audioBuffer) continue;
+    const { m, n } = paramsOf(key);
+    let guard = 0;
+    while (ch.cursor < horizon && guard++ < 2000) {
+      if (ch.cursor >= now) scheduleOne(key, ch.cursor);
+      // 单次模式只排一轮，cursor 推到不可能达到的位置
+      if (!loopOf(key)) { ch.cursor = Infinity; break; }
+      ch.cursor += m + n;
     }
-    scheduleCursor += m + n;
   }
 }
 
@@ -497,39 +662,83 @@ function pump() {
   scheduleAhead();
 }
 
-function cancelFutureEvents(now) {
-  for (let i = events.length - 1; i >= 0; i--) {
-    if (events[i].start > now) {
-      try { events[i].osc.stop(); } catch (e) {}
-      events.splice(i, 1);
+function cancelFuture(key, now) {
+  const ch = chans[key];
+  for (let i = ch.events.length - 1; i >= 0; i--) {
+    if (ch.events[i].start > now) {
+      try { ch.events[i].node.stop(); } catch (e) {}
+      ch.events.splice(i, 1);
     }
   }
 }
 
-function reschedule() {
+// 立刻掐掉正在响的这一轮，用极短淡出代替硬切
+function fadeOut(ev, now) {
+  try {
+    ev.gain.gain.cancelScheduledValues(now);
+    ev.gain.gain.setValueAtTime(ev.gain.gain.value, now);
+    ev.gain.gain.linearRampToValueAtTime(0, now + 0.04);
+    ev.node.stop(now + 0.05);
+  } catch (e) {}
+}
+
+// 参数变了：正在响的那轮不动，只重排它之后的部分
+function reschedule(key) {
   if (!running || !ctx) return;
+  const ch = chans[key];
   const now = ctx.currentTime;
-  const { n } = getParams();
-  let base = now;
-  for (const ev of events) {
-    if (ev.start <= now) base = Math.max(base, ev.end + n);
+  const { n } = paramsOf(key);
+  let live = null, nextStart = null;
+  for (const ev of ch.events) {
+    if (ev.start <= now && ev.end > now) live = ev;
+    else if (ev.start > now && (nextStart === null || ev.start < nextStart)) nextStart = ev.start;
   }
-  cancelFutureEvents(now);
-  scheduleCursor = base;
+  cancelFuture(key, now);
+  if (!loopOf(key) && live) { ch.cursor = Infinity; return; }
+  // 静默期沿用原定的下一次播放时刻，改参数不会凭空插一轮
+  ch.cursor = live ? live.end + n : (nextStart !== null ? nextStart : now);
   scheduleAhead();
+}
+
+// 运行中单独开关一条通道，不影响另一条
+function toggleChannel(key) {
+  const ch = chans[key];
+  if (!ctx || !running) { tickUI(); return; }
+  const now = ctx.currentTime;
+  if (!ch.enabled) {
+    cancelFuture(key, now);
+    for (const ev of ch.events) {
+      if (ev.start <= now && ev.end > now) fadeOut(ev, now);
+    }
+    ch.cursor = 0;
+  } else {
+    ch.cursor = now + 0.1;
+    scheduleAhead();
+  }
+  tickUI();
 }
 
 // ---------- 开始 / 停止 ----------
 async function start() {
+  if (!oscOnEl.checked && !audOnEl.checked) {
+    showNotice("两个通道都关着，先打开至少一个再开始。", "");
+    return;
+  }
+  if (audOnEl.checked && !audioBuffer) {
+    showNotice("音频通道开着但还没选文件，先选一个音频文件再开始。", "");
+    return;
+  }
   ensureCtx();
   try { await ctx.resume(); } catch (e) {}
 
-  const { m, n } = getParams();
+  const now = ctx.currentTime;
   running = true;
-  events = [];
-  roundsDone = 0;
-  runStartAudio = ctx.currentTime;
-  scheduleCursor = ctx.currentTime + 0.15;
+  runStartAudio = now;
+  for (const key of CH_KEYS) {
+    chans[key].events = [];
+    chans[key].rounds = 0;
+    chans[key].cursor = now + LEAD;
+  }
 
   scheduleAhead();
   pumpTimer = setInterval(pump, PUMP_MS);
@@ -539,7 +748,7 @@ async function start() {
   startBtn.disabled = true;
   stopBtn.disabled = false;
   testBtn.disabled = true;
-  playSecEl.disabled = gapSecEl.disabled = true;
+  setParamsDisabled(true);
 
   const ok = await acquireWakeLock();
   if (!ok && window.isSecureContext) {
@@ -554,50 +763,53 @@ async function start() {
   }
 }
 
+function setParamsDisabled(on) {
+  [oscPlaySecEl, oscGapSecEl, audPlaySecEl, audGapSecEl].forEach(el => { el.disabled = on; });
+}
+
 function stop(silent) {
   running = false;
   if (pumpTimer) { clearInterval(pumpTimer); pumpTimer = null; }
   if (uiTimer) { clearInterval(uiTimer); uiTimer = null; }
 
   const now = ctx ? ctx.currentTime : 0;
-  for (const ev of events) {
-    try { ev.osc.stop(); } catch (e) {}
+  for (const key of CH_KEYS) {
+    const ch = chans[key];
+    for (const ev of ch.events) {
+      if (ev.start <= now && ev.end > now) fadeOut(ev, now);
+      else { try { ev.node.stop(); } catch (e) {} }
+    }
+    ch.events = [];
+    ch.cursor = 0;
   }
-  events = [];
 
   releaseWakeLock();
 
   startBtn.disabled = false;
   stopBtn.disabled = true;
   testBtn.disabled = false;
-  playSecEl.disabled = gapSecEl.disabled = false;
+  setParamsDisabled(false);
 
   stateLabel.textContent = "已停止";
   bigTimer.textContent = "--";
   bigTimer.className = "big-timer";
   timerHint.textContent = "等待开始";
+  updateIdleLines();
   if (!silent) showNotice("已停止。", "");
 }
 
-// 试听一次
+// 试听一次：打开着的通道各响一轮
 async function testOnce() {
   ensureCtx();
   try { await ctx.resume(); } catch (e) {}
-  const { m, a } = getParams();
   const t = ctx.currentTime + 0.05;
-  const osc = ctx.createOscillator();
-  osc.type = currentWave;
-  osc.frequency.setValueAtTime(currentFreq, t);
-  const gain = ctx.createGain();
-  osc.connect(gain); gain.connect(ctx.destination);
-  const amp = a > 0 ? (1 - a / 100 + Math.random() * (a / 100)) : 1;
-  const f = Math.min(FADE, m / 4);
-  gain.gain.setValueAtTime(0, t);
-  gain.gain.linearRampToValueAtTime(amp, t + f);
-  gain.gain.setValueAtTime(amp, t + m - f);
-  gain.gain.linearRampToValueAtTime(0, t + m);
-  osc.start(t);
-  osc.stop(t + m);
+  if (oscOnEl.checked) scheduleOne("osc", t);
+  if (audOnEl.checked && audioBuffer) scheduleOne("aud", t);
+  if (audOnEl.checked && !audioBuffer) {
+    showNotice("只试听了正弦波：音频通道还没选文件。", "");
+  } else if (!oscOnEl.checked && !audOnEl.checked) {
+    showNotice("两个通道都关着，没什么可试听的。", "");
+  }
 }
 
 // ---------- 唤醒锁 ----------
@@ -638,40 +850,81 @@ document.addEventListener("visibilitychange", async () => {
 });
 
 // ---------- 界面刷新 ----------
+function idleLine(key) {
+  const on = key === "osc" ? oscOnEl.checked : audOnEl.checked;
+  if (!on) return "已关闭";
+  if (key === "aud" && !audioBuffer) return "等选文件";
+  return "待命";
+}
+
+function updateIdleLines() {
+  oscLineEl.textContent = idleLine("osc");
+  oscLineEl.className = "";
+  audLineEl.textContent = idleLine("aud");
+  audLineEl.className = "";
+}
+
+// 每条通道自己的状态：正在响 / 静默倒计时 / 排程中
+function viewOf(key, now) {
+  const ch = chans[key];
+  const { m, n } = paramsOf(key);
+  while (ch.events.length && ch.events[0].end <= now) ch.events.shift();
+
+  const period = m + n;
+  ch.rounds = period > 0 ? Math.max(0, Math.floor((now - runStartAudio + 0.001) / period)) : 0;
+  const tag = " · 第 " + (ch.rounds + 1) + " 轮";
+
+  if (!ch.enabled) return { text: "已关闭", cls: "", live: false, left: null };
+  const ev = ch.events[0];
+  if (ev && ev.start <= now) {
+    const left = ev.end - now;
+    return { text: "播放中 " + left.toFixed(1) + "s" + tag, cls: "playing", live: true, left: left };
+  }
+  if (ev) {
+    const left = Math.max(0, ev.start - now);
+    return { text: "静默 " + left.toFixed(1) + "s" + tag, cls: "waiting", live: false, left: left };
+  }
+  return { text: loopOf(key) ? "排程中" : "本轮已播完", cls: "", live: false, left: null };
+}
+
 function tickUI() {
-  if (!running || !ctx) return;
+  if (!running || !ctx) { updateIdleLines(); return; }
   const now = ctx.currentTime;
-  const { m, n } = getParams();
+  elapsedEl.textContent = fmtClock(now - runStartAudio);
 
-  while (events.length && events[0].end <= now) events.shift();
+  const views = {};
+  for (const key of CH_KEYS) views[key] = viewOf(key, now);
+  oscLineEl.textContent = views.osc.text;
+  oscLineEl.className = views.osc.cls;
+  audLineEl.textContent = views.aud.text;
+  audLineEl.className = views.aud.cls;
 
-  const elapsed = now - runStartAudio;
-  elapsedEl.textContent = fmtClock(elapsed);
-
-  if (events.length && events[0].start <= now) {
-    const left = events[0].end - now;
-    stateLabel.textContent = "正在播放";
-    bigTimer.textContent = left.toFixed(1);
-    bigTimer.className = "big-timer playing";
-    timerHint.textContent = "本轮剩余秒数";
-  } else {
-    let nextStart = events.length ? events[0].start : null;
-    if (nextStart === null) {
-      stateLabel.textContent = "排程中";
-      bigTimer.textContent = "--";
-      bigTimer.className = "big-timer";
-      timerHint.textContent = "";
-    } else {
-      const left = Math.max(0, nextStart - now);
-      stateLabel.textContent = "静默中";
-      bigTimer.textContent = left.toFixed(1);
-      bigTimer.className = "big-timer waiting";
-      timerHint.textContent = "距离下次播放";
+  // 大计时器优先显示正在响的那条，同时响时取先结束的；都在静默就取最近的下一次
+  let pickKey = null;
+  for (const key of CH_KEYS) {
+    const v = views[key];
+    if (v.live && (pickKey === null || v.left < views[pickKey].left)) pickKey = key;
+  }
+  if (pickKey === null) {
+    for (const key of CH_KEYS) {
+      const v = views[key];
+      if (v.left !== null && (pickKey === null || v.left < views[pickKey].left)) pickKey = key;
     }
   }
-
-  roundsDone = Math.max(0, Math.floor((now - runStartAudio + 0.001) / (m + n)));
-  roundsEl.textContent = String(roundsDone);
+  if (pickKey === null) {
+    stateLabel.textContent = "排程中";
+    bigTimer.textContent = "--";
+    bigTimer.className = "big-timer";
+    timerHint.textContent = "";
+    return;
+  }
+  const pick = views[pickKey];
+  stateLabel.textContent = pick.live ? "正在播放 · " + CH_NAME[pickKey] : "静默中 · " + CH_NAME[pickKey];
+  bigTimer.textContent = pick.left.toFixed(1);
+  bigTimer.className = "big-timer " + (pick.live ? "playing" : "waiting");
+  timerHint.textContent = pick.live
+    ? CH_NAME[pickKey] + " 本轮剩余"
+    : CH_NAME[pickKey] + " 距离下次播放";
 }
 
 // ---------- 事件绑定 ----------
@@ -679,14 +932,33 @@ startBtn.addEventListener("click", start);
 stopBtn.addEventListener("click", () => stop(false));
 testBtn.addEventListener("click", testOnce);
 
-[playSecEl, gapSecEl].forEach(el => {
-  el.addEventListener("change", () => {
-    if (running) reschedule();
+// 参数改动只重排自己那条通道，不打断另一条
+[[oscPlaySecEl, "osc"], [oscGapSecEl, "osc"], [audPlaySecEl, "aud"], [audGapSecEl, "aud"]]
+  .forEach(pair => {
+    pair[0].addEventListener("change", () => { if (running) reschedule(pair[1]); });
   });
+
+oscLoopEl.addEventListener("change", () => {
+  oscLoopDescEl.textContent = oscLoopEl.checked ? "播放完等间隔后自动再响" : "只响这一轮，播完就停";
+  if (running) reschedule("osc");
 });
 
-loopModeEl.addEventListener("change", () => {
-  if (running) reschedule();
+audLoopEl.addEventListener("change", () => {
+  audLoopDescEl.textContent = audLoopEl.checked ? "播放完等间隔后自动再响" : "只响这一轮，播完就停";
+  if (running) reschedule("aud");
+});
+
+// 通道开关运行中即时生效，未运行时只改界面
+oscOnEl.addEventListener("change", () => {
+  chans.osc.enabled = oscOnEl.checked;
+  oscBodyEl.classList.toggle("off", !oscOnEl.checked);
+  if (running) toggleChannel("osc"); else updateIdleLines();
+});
+
+audOnEl.addEventListener("change", () => {
+  chans.aud.enabled = audOnEl.checked;
+  audBodyEl.classList.toggle("off", !audOnEl.checked);
+  if (running) toggleChannel("aud"); else updateIdleLines();
 });
 
 // 幅度变化
@@ -723,6 +995,56 @@ function updateAmpDisplay() {
 
 ampRangeEl.addEventListener("input", updateAmpDisplay);
 
+// 音量实时生效，不用等下一轮
+audVolEl.addEventListener("input", () => {
+  audVolValueEl.textContent = parseInt(audVolEl.value) + "%";
+  if (audVolGain) audVolGain.gain.value = volOf();
+});
+
+// ---------- 文件导入与解码 ----------
+fileInput.addEventListener("change", async () => {
+  const f = fileInput.files && fileInput.files[0];
+  if (!f) return;
+  fileBtnText.textContent = "已选择，点击可更换";
+  fileBtn.classList.add("has-file");
+  fileInfo.classList.remove("hidden");
+  fileInfo.innerHTML = "<b>" + escapeHtml(f.name) + "</b><br>正在解码…";
+
+  try {
+    ensureCtx();
+    const ab = await f.arrayBuffer();
+    const decoded = await new Promise((res, rej) => {
+      const p = ctx.decodeAudioData(ab, res, rej);
+      if (p && p.then) p.then(res, rej);
+    });
+    audioBuffer = decoded;
+    fileInfo.innerHTML = "<b>" + escapeHtml(f.name) + "</b><br>时长 " +
+      fmtDur(audioBuffer.duration) + " · " + audioBuffer.numberOfChannels + " 声道 · " +
+      audioBuffer.sampleRate + " Hz";
+    if (audioBuffer.duration > 600) {
+      showNotice("这段素材超过 10 分钟，解码后整段常驻内存，手机可能因此丢掉页面。" +
+        "建议换一段短的。", "");
+    }
+    // 运行中换素材：本通道从当前时刻重新起排
+    if (running && chans.aud.enabled) {
+      chans.aud.cursor = ctx.currentTime + 0.1;
+      scheduleAhead();
+    }
+    tickUI();
+  } catch (err) {
+    audioBuffer = null;
+    fileInfo.innerHTML = "<b>" + escapeHtml(f.name) + "</b><br>解码失败";
+    showNotice("解码失败：" + escapeHtml(String(err && err.message || err)) +
+      "<br>请换一个常见的音频格式，比如 mp3 或 m4a。", "err");
+  }
+});
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
 // 页面被切走时提醒
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden" && running) {
@@ -740,6 +1062,7 @@ window.addEventListener("pagehide", () => { if (running) stop(true); });
   freqSlider.value = freqToSlider(currentFreq);
   updateFreqDisplay();
   updateAmpDisplay();
+  updateIdleLines();
 
   if (!window.isSecureContext) {
     showNotice("当前地址不是安全上下文（HTTP 访问）。播放功能正常，" +
