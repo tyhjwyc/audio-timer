@@ -294,6 +294,11 @@
       </div>
 
       <div class="amp-row">
+        <span class="sw-label">音量</span>
+        <input type="range" id="oscVol" min="0" max="100" value="100" step="1">
+        <span class="amp-val" id="oscVolValue">100%</span>
+      </div>
+      <div class="amp-row">
         <span class="sw-label">幅度变化</span>
         <input type="range" id="ampRange" min="0" max="100" value="0" step="1">
         <span class="amp-val" id="ampValue">0%</span>
@@ -384,6 +389,7 @@
 // ---------- 状态 ----------
 let ctx = null;
 let limiter = null;             // 两通道共用限幅器，防叠加削波
+let oscVolGain = null;          // 正弦波通道音量，改动实时生效
 let audVolGain = null;          // 音频通道音量，改动实时生效
 let running = false;
 let runStartAudio = 0;
@@ -427,6 +433,8 @@ const fileInput = $("fileInput");
 const fileBtn = $("fileBtn");
 const fileBtnText = $("fileBtnText");
 const fileInfo = $("fileInfo");
+const oscVolEl = $("oscVol");
+const oscVolValueEl = $("oscVolValue");
 const ampRangeEl = $("ampRange");
 const ampValueEl = $("ampValue");
 const startBtn = $("startBtn");
@@ -568,12 +576,12 @@ function loopOf(key) {
   return key === "osc" ? oscLoopEl.checked : audLoopEl.checked;
 }
 
-function volOf() {
-  const v = parseFloat(audVolEl.value);
-  return (isFinite(v) && v >= 0) ? Math.min(100, v) / 100 : 0.8;
+function volOf(el, fallback) {
+  const v = parseFloat(el.value);
+  return (isFinite(v) && v >= 0) ? Math.min(100, v) / 100 : fallback;
 }
 
-// 两通道汇入同一个限幅器再出，防同时响时峰值削波
+// 两通道汇入各自的通道音量，再一起进限幅器
 function ensureCtx() {
   if (!ctx) {
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -587,8 +595,11 @@ function ensureCtx() {
     limiter.release.value = 0.25;
     limiter.connect(ctx.destination);
     audVolGain = ctx.createGain();
-    audVolGain.gain.value = volOf();
+    audVolGain.gain.value = volOf(audVolEl, 0.8);
     audVolGain.connect(limiter);
+    oscVolGain = ctx.createGain();
+    oscVolGain.gain.value = volOf(oscVolEl, 1);
+    oscVolGain.connect(limiter);
   }
   return ctx;
 }
@@ -626,9 +637,9 @@ function scheduleOne(key, t) {
     const osc = ctx.createOscillator();
     osc.type = currentWave;
     osc.frequency.setValueAtTime(currentFreq, t);
-    // 随机幅度：每轮在 [1 - a/100, 1] 之间取一个
+    // 随机幅度：每轮在 [1 - a/100, 1] 之间取一个，再乘通道音量
     const amp = a > 0 ? (1 - a / 100 + Math.random() * (a / 100)) : 1;
-    makeEvent("osc", osc, limiter, t, m, amp);
+    makeEvent("osc", osc, oscVolGain, t, m, amp);
     return;
   }
   if (!audioBuffer) return;
@@ -995,10 +1006,15 @@ function updateAmpDisplay() {
 
 ampRangeEl.addEventListener("input", updateAmpDisplay);
 
-// 音量实时生效，不用等下一轮
+// 两条通道各自的音量，实时生效，不用等下一轮
 audVolEl.addEventListener("input", () => {
   audVolValueEl.textContent = parseInt(audVolEl.value) + "%";
-  if (audVolGain) audVolGain.gain.value = volOf();
+  if (audVolGain) audVolGain.gain.value = volOf(audVolEl, 0.8);
+});
+
+oscVolEl.addEventListener("input", () => {
+  oscVolValueEl.textContent = parseInt(oscVolEl.value) + "%";
+  if (oscVolGain) oscVolGain.gain.value = volOf(oscVolEl, 1);
 });
 
 // ---------- 文件导入与解码 ----------
