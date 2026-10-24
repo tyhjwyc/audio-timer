@@ -15,6 +15,8 @@ const HTTP_PORT = Number(process.env.PORT || 8080);
 const HTTPS_PORT = Number(process.env.HTTPS_PORT || 8443);
 const PFX = path.join(ROOT, "cert.pfx");
 const PFX_PASS = process.env.PFX_PASS || "dsh";
+// 客户端把调试日志 POST 到 /__log，落到这个文件里方便后台查看
+const CLIENT_LOG = path.join(os.tmpdir(), "audio-timer-client.log");
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -49,7 +51,24 @@ function listIPv4() {
   return out;
 }
 
+function collectLog(req, res) {
+  let body = "";
+  req.setEncoding("utf8");
+  req.on("data", chunk => {
+    body += chunk;
+    if (body.length > 200000) req.destroy();
+  });
+  req.on("end", () => {
+    const ip = (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
+    const line = new Date().toISOString() + "  " + ip + "  " + body.replace(/\s+$/, "") + "\n";
+    fs.appendFile(CLIENT_LOG, line, () => {});
+    res.writeHead(204, { "Access-Control-Allow-Origin": "*" });
+    res.end();
+  });
+}
+
 function serve(req, res) {
+  if (req.method === "POST" && req.url === "/__log") { collectLog(req, res); return; }
   let urlPath;
   try {
     urlPath = decodeURIComponent(new URL(req.url, "http://placeholder").pathname);
@@ -93,6 +112,7 @@ httpServer.listen(HTTP_PORT, "0.0.0.0", () => {
   console.log("");
   console.log("=== HTTP 服务已启动（端口 " + HTTP_PORT + "）===");
   console.log("本机: http://localhost:" + HTTP_PORT);
+  console.log("客户端日志: " + CLIENT_LOG);
   for (const ip of ips) {
     console.log("手机: http://" + ip.address + ":" + HTTP_PORT + "   [" + ip.name + "]");
   }

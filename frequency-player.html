@@ -379,12 +379,28 @@
       <button class="btn btn-stop" id="stopBtn" disabled>停止</button>
       <button class="btn btn-test" id="testBtn">试听一次</button>
     </div>
+    <button class="btn btn-test" id="fsBtn">全屏显示</button>
   </div>
 
 </div>
 
 <script>
 "use strict";
+
+// 调试通道：异常与关键动作发到本地服务器的 /__log，后台可读
+function post(obj) {
+  try { fetch("/__log", { method: "POST", body: JSON.stringify(obj) }).catch(() => {}); } catch (e) {}
+}
+window.addEventListener("error", e => post({
+  tag: "player-error",
+  msg: e.message,
+  where: e.filename + ":" + e.lineno,
+  stack: e.error && e.error.stack ? String(e.error.stack) : ""
+}));
+window.addEventListener("unhandledrejection", e => {
+  const r = e.reason;
+  post({ tag: "player-reject", msg: r && (r.stack || r.message) ? String(r.stack || r.message) : String(r) });
+});
 
 // ---------- 状态 ----------
 let ctx = null;
@@ -393,6 +409,7 @@ let oscVolGain = null;          // 正弦波通道音量，改动实时生效
 let audVolGain = null;          // 音频通道音量，改动实时生效
 let running = false;
 let runStartAudio = 0;
+let runStartPerf = 0;
 let wakeLock = null;
 let pumpTimer = null;
 let uiTimer = null;
@@ -408,7 +425,11 @@ const chans = {
 
 const LOOKAHEAD = 30;
 const PUMP_MS = 5000;
-const FADE = 0.008;
+const FADE = 0.008;             // 音频通道的淡变够用
+const STOP_FADE = 1.0;          // 停止淡出用满 1 秒，与干净样本一致
+const OSC_HEADROOM = 0.7;       // Web Audio 路径的余量
+const OSC_WAVE_LEVEL = 1.0;     // 波形满幅，输出电平由增益节点控制
+const OSC_MAX_GAIN = 0.85;      // 音量拉满时的实际峰值，留 1.4dB 防设备端音效削波
 const LEAD = 0.15;              // 开始后留一点余量再开第一声
 
 // ---------- 元素 ----------
@@ -440,6 +461,7 @@ const ampValueEl = $("ampValue");
 const startBtn = $("startBtn");
 const stopBtn = $("stopBtn");
 const testBtn = $("testBtn");
+const fsBtn = $("fsBtn");
 const stateLabel = $("stateLabel");
 const bigTimer = $("bigTimer");
 const timerHint = $("timerHint");
@@ -582,18 +604,28 @@ function volOf(el, fallback) {
 }
 
 // 两通道汇入各自的通道音量，再一起进限幅器
+// 地址后加 ?nolimit=1 就绕开压缩器，用来判断爆音是否出在这一级
+const BYPASS_LIMIT = new URLSearchParams(location.search).has("nolimit");
+// 默认 playback 大缓冲：interactive 缓冲偏小，华为浏览器上会偶发欠载
+const LATENCY = new URLSearchParams(location.search).get("latency") || "playback";
+
 function ensureCtx() {
   if (!ctx) {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) throw new Error("这个浏览器不支持 Web Audio");
-    ctx = new AC();
-    limiter = ctx.createDynamicsCompressor();
-    limiter.threshold.value = -1;
-    limiter.knee.value = 0;
-    limiter.ratio.value = 20;
-    limiter.attack.value = 0.003;
-    limiter.release.value = 0.25;
-    limiter.connect(ctx.destination);
+    ctx = new AC({ latencyHint: LATENCY });
+    if (BYPASS_LIMIT) {
+      limiter = ctx.createGain();
+      limiter.connect(ctx.destination);
+    } else {
+      limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -1;
+      limiter.knee.value = 0;
+      limiter.ratio.value = 20;
+      limiter.attack.value = 0.003;
+      limiter.release.value = 0.25;
+      limiter.connect(ctx.destination);
+    }
     audVolGain = ctx.createGain();
     audVolGain.gain.value = volOf(audVolEl, 0.8);
     audVolGain.connect(limiter);
@@ -604,14 +636,190 @@ function ensureCtx() {
   return ctx;
 }
 
+// ---------- 正弦通道：audio 元素引擎 ----------
+// 华为浏览器上实时合成振荡器起停会爆，改用预渲染波形 + 媒体播放器，与干净的对照样本一致
+let oscCtx = null;
+let oscBuffer = null;
+let oscBufferKey = "";
+let oscSrc = null;              // { node, gain } 当前这一轮
+let oscPhase = "idle";          // idle / playing / fading / waiting / done
+let oscRoundStart = 0;
+let oscRoundEnd = 0;
+let oscGapEnd = 0;
+let oscRoundNo = 0;
+let oscTimers = [];
+
+function perfNow() {
+  return performance.now() / 1000;
+}
+
+function oscClearTimers() {
+  oscTimers.forEach(clearTimeout);
+  oscTimers = [];
+}
+
+// 取整数个周期，loop 接点相位连续，循环处不会咔一声
+async function oscEnsureBuffer() {
+  const key = currentFreq + "|" + currentWave;
+  if (oscBuffer && oscBufferKey === key) return oscBuffer;
+  const sr = 44100;
+  const seconds = 4;
+  const cycles = Math.max(1, Math.round(currentFreq * seconds));
+  const length = Math.max(1, Math.round(cycles / currentFreq * sr));
+  const off = new OfflineAudioContext(1, length, sr);
+  const o = off.createOscillator();
+  o.type = currentWave;
+  o.frequency.value = currentFreq;
+  const g = off.createGain();
+  g.gain.value = OSC_WAVE_LEVEL;
+  o.connect(g);
+  g.connect(off.destination);
+  o.start(0);
+  oscBuffer = await off.startRendering();
+  oscBufferKey = key;
+  return oscBuffer;
+}
+
+function oscEnsureCtx() {
+  if (!oscCtx) {
+    oscCtx = new AudioContext({ latencyHint: "playback" });
+    post({ tag: "osc-ctx", rate: oscCtx.sampleRate, base: oscCtx.baseLatency || null });
+  }
+  return oscCtx;
+}
+
+function oscTargetVol() {
+  const a = parseFloat(ampRangeEl.value);
+  const amp = (isFinite(a) && a > 0) ? (1 - a / 100 + Math.random() * (a / 100)) : 1;
+  return Math.max(0.0001, volOf(oscVolEl, 1) * amp * OSC_MAX_GAIN);
+}
+
+// 每轮一个独立增益，指数包络起落，停止先降到 0.0001 再 stop
+function oscFade(ev, to, seconds) {
+  if (!oscCtx || !ev) return;
+  const now = oscCtx.currentTime;
+  const from = Math.max(0.0001, ev.gain.gain.value);
+  ev.gain.gain.cancelScheduledValues(now);
+  ev.gain.gain.setValueAtTime(from, now);
+  ev.gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, to), now + seconds);
+}
+
+function oscDispose(ev, delay) {
+  setTimeout(() => {
+    try { ev.node.stop(); ev.node.disconnect(); ev.gain.disconnect(); } catch (e) {}
+  }, delay);
+}
+
+async function oscRound() {
+  if (!running || !chans.osc.enabled) return;
+  const c = oscEnsureCtx();
+  await c.resume();
+  const buf = await oscEnsureBuffer();
+  if (!running || !chans.osc.enabled) return;
+  const { m, n } = paramsOf("osc");
+  const target = oscTargetVol();
+  const node = c.createBufferSource();
+  node.buffer = buf;
+  node.loop = true;
+  const gain = c.createGain();
+  gain.gain.value = 0.0001;
+  node.connect(gain);
+  gain.connect(c.destination);
+  node.start();
+  const ev = { node: node, gain: gain };
+  oscSrc = ev;
+  oscRoundNo++;
+  oscPhase = "playing";
+  oscRoundStart = perfNow();
+  oscRoundEnd = oscRoundStart + m;
+  oscFade(ev, target, 1.5);
+  oscTimers.push(setTimeout(() => {
+    if (!running) return;
+    oscPhase = "fading";
+    oscFade(ev, 0.0001, 1.0);
+    oscTimers.push(setTimeout(() => {
+      oscDispose(ev, 0);
+      if (oscSrc === ev) oscSrc = null;
+      if (!running) return;
+      if (!loopOf("osc")) { oscPhase = "done"; tickUI(); return; }
+      oscPhase = "waiting";
+      oscGapEnd = perfNow() + n;
+      oscTimers.push(setTimeout(oscRound, n * 1000));
+      tickUI();
+    }, 1100));
+  }, m * 1000));
+  tickUI();
+}
+
+function oscStop() {
+  oscClearTimers();
+  oscPhase = "idle";
+  const ev = oscSrc;
+  if (!ev) return;
+  oscSrc = null;
+  oscFade(ev, 0.0001, 1.0);
+  oscDispose(ev, 1100);
+}
+
+async function oscPreview() {
+  const c = oscEnsureCtx();
+  await c.resume();
+  const buf = await oscEnsureBuffer();
+  const node = c.createBufferSource();
+  node.buffer = buf;
+  node.loop = true;
+  const gain = c.createGain();
+  gain.gain.value = 0.0001;
+  node.connect(gain);
+  gain.connect(c.destination);
+  node.start();
+  const ev = { node: node, gain: gain };
+  oscFade(ev, oscTargetVol(), 1.0);
+  setTimeout(() => {
+    oscFade(ev, 0.0001, 1.0);
+    oscDispose(ev, 1100);
+  }, 3000);
+}
+
+function oscView(nowPerf) {
+  if (!chans.osc.enabled) return { text: "已关闭", cls: "", live: false, left: null };
+  if (oscPhase === "playing" || oscPhase === "fading") {
+    const left = Math.max(0, oscRoundEnd - nowPerf);
+    return {
+      text: "播放中 " + left.toFixed(1) + "s · 第 " + oscRoundNo + " 轮",
+      cls: "playing", live: true, left: left
+    };
+  }
+  if (oscPhase === "waiting") {
+    const left = Math.max(0, oscGapEnd - nowPerf);
+    return {
+      text: "静默 " + left.toFixed(1) + "s · 第 " + (oscRoundNo + 1) + " 轮",
+      cls: "waiting", live: false, left: left
+    };
+  }
+  if (oscPhase === "done") return { text: "本轮已播完", cls: "", live: false, left: null };
+  return { text: "待命", cls: "", live: false, left: null };
+}
+
+function rescheduleOsc() {
+  if (!running || !chans.osc.enabled) return;
+  if (oscPhase !== "waiting") { tickUI(); return; }
+  oscClearTimers();
+  const { n } = paramsOf("osc");
+  oscGapEnd = perfNow() + n;
+  oscTimers.push(setTimeout(oscRound, n * 1000));
+  tickUI();
+}
+
 // ---------- 调度核心 ----------
 // 包络固定：起点 0，FADE 内升到 level，末尾 FADE 内落回 0，切在波形中间也不爆音
-function makeEvent(key, node, out, start, m, level) {
+// 淡变时长按音源给：30Hz 若只淡 8ms，起落本身就是一声闷响
+function makeEvent(key, node, out, start, m, level, fade) {
   const gain = ctx.createGain();
   node.connect(gain);
   gain.connect(out);
 
-  const f = Math.min(FADE, m / 4);
+  const f = Math.min(fade, m / 4);
   gain.gain.setValueAtTime(0, start);
   gain.gain.linearRampToValueAtTime(level, start + f);
   gain.gain.setValueAtTime(level, start + m - f);
@@ -626,6 +834,8 @@ function makeEvent(key, node, out, start, m, level) {
   node.onended = () => {
     const i = ch.events.indexOf(ev);
     if (i >= 0) ch.events.splice(i, 1);
+    // 不断开就一直挂在图上，长时间运行节点越积越多
+    try { node.disconnect(); gain.disconnect(); } catch (e) {}
   };
   return ev;
 }
@@ -639,7 +849,9 @@ function scheduleOne(key, t) {
     osc.frequency.setValueAtTime(currentFreq, t);
     // 随机幅度：每轮在 [1 - a/100, 1] 之间取一个，再乘通道音量
     const amp = a > 0 ? (1 - a / 100 + Math.random() * (a / 100)) : 1;
-    makeEvent("osc", osc, oscVolGain, t, m, amp);
+    // 30Hz 给满 1 秒：30 个周期才收放得住，短淡变就是可闻的一记闷响
+    const fade = Math.max(FADE, Math.min(1.0, 30 / currentFreq));
+    makeEvent("osc", osc, oscVolGain, t, m, amp * OSC_HEADROOM, fade);
     return;
   }
   if (!audioBuffer) return;
@@ -647,7 +859,7 @@ function scheduleOne(key, t) {
   src.buffer = audioBuffer;
   // 素材短于播放时长就循环补齐，长于播放时长就播到 M 秒切断
   src.loop = true;
-  makeEvent("aud", src, audVolGain, t, m, 1);
+  makeEvent("aud", src, audVolGain, t, m, 1, FADE);
 }
 
 function scheduleAhead() {
@@ -657,6 +869,7 @@ function scheduleAhead() {
   for (const key of CH_KEYS) {
     const ch = chans[key];
     if (!ch.enabled) continue;
+    if (key === "osc") continue;   // 正弦通道走 audio 引擎，不进 Web Audio 时间轴
     if (key === "aud" && !audioBuffer) continue;
     const { m, n } = paramsOf(key);
     let guard = 0;
@@ -683,19 +896,28 @@ function cancelFuture(key, now) {
   }
 }
 
-// 立刻掐掉正在响的这一轮，用极短淡出代替硬切
-function fadeOut(ev, now) {
+// 立刻掐掉正在响的这一轮，用淡出代替硬切
+// 从当前值起坡：cancelAndHoldAtTime 保留正在跑的包络值，读 .value 可能拿到上一帧
+function fadeOut(ev, now, dur) {
+  const d = dur || STOP_FADE;
   try {
-    ev.gain.gain.cancelScheduledValues(now);
-    ev.gain.gain.setValueAtTime(ev.gain.gain.value, now);
-    ev.gain.gain.linearRampToValueAtTime(0, now + 0.04);
-    ev.node.stop(now + 0.05);
+    const g = ev.gain.gain;
+    if (typeof g.cancelAndHoldAtTime === "function") {
+      g.cancelAndHoldAtTime(now);
+    } else {
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(g.value, now);
+    }
+    g.linearRampToValueAtTime(0, now + d);
+    ev.node.stop(now + d + 0.02);
   } catch (e) {}
 }
 
 // 参数变了：正在响的那轮不动，只重排它之后的部分
 function reschedule(key) {
-  if (!running || !ctx) return;
+  if (!running) return;
+  if (key === "osc") { rescheduleOsc(); return; }
+  if (!ctx) return;
   const ch = chans[key];
   const now = ctx.currentTime;
   const { n } = paramsOf(key);
@@ -714,7 +936,19 @@ function reschedule(key) {
 // 运行中单独开关一条通道，不影响另一条
 function toggleChannel(key) {
   const ch = chans[key];
-  if (!ctx || !running) { tickUI(); return; }
+  if (!running) { tickUI(); return; }
+  if (key === "osc") {
+    if (!ch.enabled) oscStop();
+    else { oscPhase = "idle"; oscRound(); }
+    tickUI();
+    return;
+  }
+  if (!ctx) {
+    if (!ch.enabled) { tickUI(); return; }
+    ensureCtx();
+    runStartAudio = ctx.currentTime;
+    ctx.resume().catch(() => {});
+  }
   const now = ctx.currentTime;
   if (!ch.enabled) {
     cancelFuture(key, now);
@@ -739,22 +973,38 @@ async function start() {
     showNotice("音频通道开着但还没选文件，先选一个音频文件再开始。", "");
     return;
   }
-  ensureCtx();
-  try { await ctx.resume(); } catch (e) {}
+  // 只有音频通道需要 Web Audio，正弦通道用 audio 元素
+  if (audOnEl.checked) {
+    ensureCtx();
+    try { await ctx.resume(); } catch (e) {}
+  }
 
-  const now = ctx.currentTime;
   running = true;
-  runStartAudio = now;
+  runStartPerf = perfNow();
+  if (ctx) runStartAudio = ctx.currentTime;
   for (const key of CH_KEYS) {
     chans[key].events = [];
     chans[key].rounds = 0;
-    chans[key].cursor = now + LEAD;
+    if (ctx) chans[key].cursor = ctx.currentTime + LEAD;
   }
 
   scheduleAhead();
   pumpTimer = setInterval(pump, PUMP_MS);
   uiTimer = setInterval(tickUI, 100);
+  oscRoundNo = 0;
+  oscPhase = "idle";
+  if (chans.osc.enabled) oscRound();
   tickUI();
+  post({
+    tag: "player-start",
+    latency: LATENCY,
+    rate: ctx ? ctx.sampleRate : null,
+    base: ctx && ctx.baseLatency ? ctx.baseLatency : null,
+    state: ctx ? ctx.state : "no-ctx",
+    engine: "webaudio-buffer",
+    freq: currentFreq,
+    wave: currentWave
+  });
 
   startBtn.disabled = true;
   stopBtn.disabled = false;
@@ -782,6 +1032,7 @@ function stop(silent) {
   running = false;
   if (pumpTimer) { clearInterval(pumpTimer); pumpTimer = null; }
   if (uiTimer) { clearInterval(uiTimer); uiTimer = null; }
+  oscStop();
 
   const now = ctx ? ctx.currentTime : 0;
   for (const key of CH_KEYS) {
@@ -811,11 +1062,12 @@ function stop(silent) {
 
 // 试听一次：打开着的通道各响一轮
 async function testOnce() {
-  ensureCtx();
-  try { await ctx.resume(); } catch (e) {}
-  const t = ctx.currentTime + 0.05;
-  if (oscOnEl.checked) scheduleOne("osc", t);
-  if (audOnEl.checked && audioBuffer) scheduleOne("aud", t);
+  if (audOnEl.checked) {
+    ensureCtx();
+    try { await ctx.resume(); } catch (e) {}
+    if (audioBuffer) scheduleOne("aud", ctx.currentTime + 0.05);
+  }
+  if (oscOnEl.checked) oscPreview();
   if (audOnEl.checked && !audioBuffer) {
     showNotice("只试听了正弦波：音频通道还没选文件。", "");
   } else if (!oscOnEl.checked && !audOnEl.checked) {
@@ -860,6 +1112,59 @@ document.addEventListener("visibilitychange", async () => {
   }
 });
 
+// ---------- 全屏 ----------
+let fsMarked = false;       // 历史里有一条专为全屏预留，返回键先吃掉它
+
+function isFullscreen() {
+  return !!(document.fullscreenElement || document.webkitFullscreenElement);
+}
+
+function syncFsButton() {
+  fsBtn.textContent = isFullscreen() ? "退出全屏" : "全屏显示";
+}
+
+async function enterFullscreen() {
+  const el = document.documentElement;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!req) {
+    showNotice("这个浏览器不支持网页全屏。iPhone 可以用浏览器分享菜单里的" +
+      "<b>添加到主屏幕</b>，从主屏幕打开就没有地址栏。", "");
+    return;
+  }
+  try {
+    await req.call(el);
+    // 不补这一条，返回键会直接离开页面而不是退出全屏
+    history.pushState({ fullscreen: true }, "");
+    fsMarked = true;
+    syncFsButton();
+  } catch (e) {
+    showNotice("进入全屏失败：" + escapeHtml(String(e && e.message || e)), "err");
+  }
+}
+
+async function exitFullscreenNow() {
+  const ex = document.exitFullscreen || document.webkitExitFullscreen;
+  if (ex && isFullscreen()) {
+    try { await ex.call(document); } catch (e) {}
+  }
+  syncFsButton();
+}
+
+function leaveFullscreen() {
+  exitFullscreenNow();
+  if (fsMarked) { fsMarked = false; history.back(); }
+}
+
+// 全屏下按返回键：只退全屏，页面留着
+window.addEventListener("popstate", () => {
+  if (!isFullscreen()) return;
+  fsMarked = false;
+  exitFullscreenNow();
+});
+
+document.addEventListener("fullscreenchange", syncFsButton);
+document.addEventListener("webkitfullscreenchange", syncFsButton);
+
 // ---------- 界面刷新 ----------
 function idleLine(key) {
   const on = key === "osc" ? oscOnEl.checked : audOnEl.checked;
@@ -899,12 +1204,13 @@ function viewOf(key, now) {
 }
 
 function tickUI() {
-  if (!running || !ctx) { updateIdleLines(); return; }
-  const now = ctx.currentTime;
-  elapsedEl.textContent = fmtClock(now - runStartAudio);
+  if (!running) { updateIdleLines(); return; }
+  const nowPerf = perfNow();
+  elapsedEl.textContent = fmtClock(nowPerf - runStartPerf);
 
   const views = {};
-  for (const key of CH_KEYS) views[key] = viewOf(key, now);
+  views.osc = oscView(nowPerf);
+  views.aud = ctx ? viewOf("aud", ctx.currentTime) : { text: "已关闭", cls: "", live: false, left: null };
   oscLineEl.textContent = views.osc.text;
   oscLineEl.className = views.osc.cls;
   audLineEl.textContent = views.aud.text;
@@ -942,6 +1248,9 @@ function tickUI() {
 startBtn.addEventListener("click", start);
 stopBtn.addEventListener("click", () => stop(false));
 testBtn.addEventListener("click", testOnce);
+fsBtn.addEventListener("click", () => {
+  if (isFullscreen()) leaveFullscreen(); else enterFullscreen();
+});
 
 // 参数改动只重排自己那条通道，不打断另一条
 [[oscPlaySecEl, "osc"], [oscGapSecEl, "osc"], [audPlaySecEl, "aud"], [audGapSecEl, "aud"]]
@@ -1079,6 +1388,7 @@ window.addEventListener("pagehide", () => { if (running) stop(true); });
   updateFreqDisplay();
   updateAmpDisplay();
   updateIdleLines();
+  syncFsButton();
 
   if (!window.isSecureContext) {
     showNotice("当前地址不是安全上下文（HTTP 访问）。播放功能正常，" +
