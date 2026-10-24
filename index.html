@@ -75,6 +75,41 @@
   input[type=number]::-webkit-outer-spin-button,
   input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
+  /* 进度 / 起点滑块 */
+  .seek-box { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .seek-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+  .seek-head label { font-size: 13px; color: var(--dim); }
+  .seek-head .seek-time {
+    font-size: 13px; color: var(--text);
+    font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
+  }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    display: block; width: 100%; height: 34px; margin: 0;
+    background: transparent; outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 6px; border-radius: 3px;
+    background: linear-gradient(to right,
+      var(--accent) calc(var(--p, 0) * 1%),
+      var(--line) calc(var(--p, 0) * 1%));
+  }
+  input[type=range]::-moz-range-track { height: 6px; border-radius: 3px; background: var(--line); }
+  input[type=range]::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--accent); }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 22px; height: 22px; margin-top: -8px;
+    border: none; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(52, 199, 89, 0.16);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 22px; height: 22px; border: none; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 0 4px rgba(52, 199, 89, 0.16);
+  }
+  input[type=range]:disabled { cursor: not-allowed; }
+  input[type=range]:disabled::-webkit-slider-thumb { background: #4a4a55; box-shadow: none; }
+  .seek-unit { font-size: 12px; color: #5c5c66; margin-top: 2px; }
+
   .switch-row {
     display: flex; align-items: center; justify-content: space-between;
     margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line);
@@ -173,6 +208,14 @@
         <span class="unit">秒（从上次结束算起）</span>
       </div>
     </div>
+    <div class="seek-box">
+      <div class="seek-head">
+        <label for="seek">播放位置</label>
+        <span class="seek-time" id="seekTime">0:00 / --</span>
+      </div>
+      <input type="range" id="seek" min="0" max="0" step="0.01" value="0" disabled>
+      <div class="seek-unit">拖动选择起点：开播时从这里起播；播放中拖动，下一轮生效</div>
+    </div>
     <div class="switch-row">
       <div>
         <div class="sw-label">音频循环补齐</div>
@@ -217,6 +260,9 @@ let running = false;
 let events = [];                // {start, end, src} 已调度的事件（音频时钟）
 let scheduleCursor = 0;         // 下一个事件的起始时间（音频时钟）
 let runStartAudio = 0;          // 本轮开始的音频时钟
+let playOffset = 0;             // 每轮从素材第几秒起播
+let seeking = false;            // 正在拖滑块，暂停跟随
+let seekFollowFrom = 0;         // 早于此音频时刻不跟随播放位置
 let roundsDone = 0;
 let wakeLock = null;
 let pumpTimer = null;           // 补充调度器（不负责触发，只负责补排）
@@ -231,6 +277,7 @@ const $ = id => document.getElementById(id);
 const fileInput = $("fileInput"), fileBtn = $("fileBtn"), fileBtnText = $("fileBtnText");
 const fileInfo = $("fileInfo"), noticeEl = $("notice");
 const playSecEl = $("playSec"), gapSecEl = $("gapSec"), loopModeEl = $("loopMode");
+const seekEl = $("seek"), seekTimeEl = $("seekTime");
 const startBtn = $("startBtn"), stopBtn = $("stopBtn"), testBtn = $("testBtn");
 const stateLabel = $("stateLabel"), bigTimer = $("bigTimer"), timerHint = $("timerHint");
 const elapsedEl = $("elapsed"), roundsEl = $("rounds"), wakeStateEl = $("wakeState");
@@ -266,6 +313,54 @@ function getParams() {
   };
 }
 
+// 起点落在素材内，贴末尾会立刻结束
+function startOffset() {
+  if (!buffer) return 0;
+  const d = buffer.duration;
+  if (!isFinite(d) || d <= 0) return 0;
+  return Math.min(Math.max(playOffset, 0), Math.max(0, d - 0.02));
+}
+
+// 当前正在响的那一轮的结束时刻，没有则 0
+function activeEnd() {
+  if (!ctx || !running) return 0;
+  const now = ctx.currentTime;
+  for (const ev of events) {
+    if (ev.start <= now && now < ev.end) return ev.end;
+  }
+  return 0;
+}
+
+function updateSeekUI() {
+  if (!buffer) {
+    seekEl.disabled = true;
+    seekEl.max = "0";
+    seekEl.value = 0;
+    seekEl.style.setProperty("--p", 0);
+    seekTimeEl.textContent = "0:00 / --";
+    return;
+  }
+  const d = buffer.duration;
+  seekEl.disabled = false;
+  seekEl.max = String(d);
+
+  let pos = startOffset();
+  if (running && ctx && !seeking && ctx.currentTime >= seekFollowFrom) {
+    const now = ctx.currentTime;
+    const ev = events.find(e => e.start <= now && now < e.end);
+    if (ev) {
+      const off = ev.off || 0;
+      let adv = now - ev.start;
+      if (ev.looping) adv %= Math.max(0.02, d - off);
+      pos = Math.min(d, off + adv);
+    }
+  }
+  const shown = seeking ? (parseFloat(seekEl.value) || 0) : pos;
+  if (!seeking) seekEl.value = String(pos);
+  seekEl.style.setProperty("--p", d > 0 ? (shown / d) * 100 : 0);
+  seekTimeEl.textContent = fmtClock(shown) + " / " + fmtClock(d);
+}
+
 // ---------- 音频上下文 ----------
 function ensureCtx() {
   if (!ctx) {
@@ -294,17 +389,21 @@ fileInput.addEventListener("change", async () => {
       if (p && p.then) p.then(res, rej);
     });
     buffer = decoded;
+    playOffset = 0;
+    seekEl.value = "0";
     fileInfo.innerHTML = "<b>" + escapeHtml(f.name) + "</b><br>时长 " +
       fmtDur(buffer.duration) + " · " + buffer.numberOfChannels + " 声道 · " +
       buffer.sampleRate + " Hz";
     startBtn.disabled = false;
     testBtn.disabled = false;
     updateLoopDesc();
+    updateSeekUI();
     showNotice("素材已就绪。点<b>开始播放</b>后，请让这个页面保持在前台、屏幕不要手动锁掉。", "ok");
   } catch (err) {
     buffer = null;
     startBtn.disabled = true;
     testBtn.disabled = true;
+    updateSeekUI();
     fileInfo.innerHTML = "<b>" + escapeHtml(f.name) + "</b><br>解码失败";
     showNotice("解码失败：" + escapeHtml(String(err && err.message || err)) +
       "<br>请换一个常见的音频格式，比如 mp3 或 m4a。", "err");
@@ -359,6 +458,7 @@ document.addEventListener("visibilitychange", async () => {
 // 用音频硬件时钟预调度，不用任何定时器触发播放，因此不存在漂移累积
 function scheduleOne(t) {
   const { m } = getParams();
+  const off = startOffset();
   const src = ctx.createBufferSource();
   src.buffer = buffer;
 
@@ -373,22 +473,21 @@ function scheduleOne(t) {
   gain.gain.setValueAtTime(1, t + m - f);
   gain.gain.linearRampToValueAtTime(0, t + m);
 
-  if (loopModeEl.checked) {
-    // 素材不足 M 秒时循环补齐
+  const looping = loopModeEl.checked;
+  if (looping) {
+    // 素材不足 M 秒时循环补齐；循环段锁在起点到末尾，不会跑回起点之前
     src.loop = true;
-    src.start(t, 0);
+    src.loopStart = off;
+    src.loopEnd = buffer.duration;
+    src.start(t, off);
     src.stop(t + m);
   } else {
     // 素材播完就静音，直到下一轮
-    src.start(t, 0, m);
+    src.start(t, off, m);
   }
 
-  const ev = { start: t, end: t + m, src: src };
+  const ev = { start: t, end: t + m, src: src, off: off, looping: looping };
   events.push(ev);
-  src.onended = () => {
-    const i = events.indexOf(ev);
-    if (i >= 0) events.splice(i, 1);
-  };
 }
 
 function scheduleAhead() {
@@ -417,17 +516,25 @@ function cancelFutureEvents(now) {
   }
 }
 
-// 参数改变时重新排程：让正在播放的那一轮播完，之后按新参数走
+// 参数或起点改变时重新排程：正在响的那一轮播完，之后按新参数走
 function reschedule() {
   if (!running || !ctx) return;
   const now = ctx.currentTime;
   const { n } = getParams();
-  let base = now;
+  while (events.length && events[0].end <= now) events.shift();
+
+  let base = 0;
   for (const ev of events) {
     if (ev.start <= now) base = Math.max(base, ev.end + n);
   }
+  if (!base) {
+    // 静默期：保留原本的下一轮时刻，只换起点
+    for (const ev of events) {
+      if (ev.start > now) base = base ? Math.min(base, ev.start) : ev.start;
+    }
+  }
   cancelFutureEvents(now);
-  scheduleCursor = base;
+  scheduleCursor = base || now + 0.05;
   scheduleAhead();
 }
 
@@ -442,6 +549,7 @@ async function start() {
   events = [];
   roundsDone = 0;
   runStartAudio = ctx.currentTime;
+  seekFollowFrom = 0;
   scheduleCursor = ctx.currentTime + 0.15;   // 留一点余量再开第一声
 
   scheduleAhead();
@@ -489,6 +597,8 @@ function stop(silent) {
   bigTimer.textContent = "--";
   bigTimer.className = "big-timer";
   timerHint.textContent = "等待开始";
+  seekFollowFrom = 0;
+  updateSeekUI();
   if (!silent) showNotice("已停止。", "");
 }
 
@@ -498,6 +608,7 @@ async function testOnce() {
   ensureCtx();
   try { await ctx.resume(); } catch (e) {}
   const { m } = getParams();
+  const off = startOffset();
   const t = ctx.currentTime + 0.05;
   const src = ctx.createBufferSource();
   src.buffer = buffer;
@@ -508,8 +619,15 @@ async function testOnce() {
   gain.gain.linearRampToValueAtTime(1, t + f);
   gain.gain.setValueAtTime(1, t + m - f);
   gain.gain.linearRampToValueAtTime(0, t + m);
-  if (loopModeEl.checked) { src.loop = true; src.start(t, 0); src.stop(t + m); }
-  else { src.start(t, 0, m); }
+  if (loopModeEl.checked) {
+    src.loop = true;
+    src.loopStart = off;
+    src.loopEnd = buffer.duration;
+    src.start(t, off);
+    src.stop(t + m);
+  } else {
+    src.start(t, off, m);
+  }
 }
 
 // ---------- 界面刷新 ----------
@@ -551,12 +669,30 @@ function tickUI() {
   // 已完成轮数：用音频时钟估算
   roundsDone = Math.max(0, Math.floor((now - runStartAudio + 0.001) / (m + n)));
   roundsEl.textContent = String(roundsDone);
+
+  updateSeekUI();
 }
 
 // ---------- 事件绑定 ----------
 startBtn.addEventListener("click", start);
 stopBtn.addEventListener("click", () => stop(false));
 testBtn.addEventListener("click", testOnce);
+
+// 拖动即改起点；播放中拖则本轮播完后按新起点走
+seekEl.addEventListener("input", () => {
+  seeking = true;
+  playOffset = parseFloat(seekEl.value) || 0;
+  updateSeekUI();
+  updateLoopDesc();
+});
+seekEl.addEventListener("change", () => {
+  seeking = false;
+  playOffset = parseFloat(seekEl.value) || 0;
+  seekFollowFrom = activeEnd() || (ctx ? ctx.currentTime : 0);
+  if (running) reschedule();
+  updateLoopDesc();
+  updateSeekUI();
+});
 
 [playSecEl, gapSecEl].forEach(el => {
   el.addEventListener("change", () => {
@@ -572,10 +708,17 @@ loopModeEl.addEventListener("change", () => {
 function updateLoopDesc() {
   const { m } = getParams();
   const desc = $("loopDesc");
-  if (buffer && buffer.duration < m) {
+  if (!buffer) {
+    desc.textContent = "素材不足播放时长时自动循环";
+    return;
+  }
+  const off = startOffset();
+  const rest = Math.max(0, buffer.duration - off);
+  const from = off > 0.005 ? "起点后" : "素材";
+  if (rest < m) {
     desc.textContent = loopModeEl.checked
-      ? "素材 " + fmtDur(buffer.duration) + " 不足 " + m + " 秒，将循环补齐"
-      : "素材 " + fmtDur(buffer.duration) + " 播完即静音，本轮不足 " + m + " 秒";
+      ? from + "只剩 " + fmtDur(rest) + "，不足 " + m + " 秒，将循环补齐"
+      : from + "只剩 " + fmtDur(rest) + "，播完即静音，本轮不足 " + m + " 秒";
   } else {
     desc.textContent = "素材不足播放时长时自动循环";
   }
